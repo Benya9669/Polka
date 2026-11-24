@@ -18,6 +18,8 @@ WORKDIR /app
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ .
+COPY VERSION /app/VERSION
+ENV POLKA_VERSION_FILE=/app/VERSION
 COPY --from=frontend /src/dist /app/web
 USER 10001:10001
 EXPOSE 8080

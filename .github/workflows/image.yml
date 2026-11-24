@@ -1,12 +1,15 @@
-name: Build Polka image
+name: CI / Release
 
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -15,27 +18,35 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Build Linux image
         run: docker buildx build --load --platform linux/amd64 -t polka:ci .
       - name: Check application and converter
         run: docker run --rm polka:ci sh -ec 'test -s /app/web/index.html && python -c "import app.main" && ebook-convert --version'
+      - name: Run backend tests
+        run: >
+          docker run --rm polka:ci sh -ec
+          'python -m pip install --target /tmp/test-deps pytest httpx &&
+          PYTHONPATH=/tmp/test-deps python -m pytest -q -p no:cacheprovider tests'
       - name: Publish to GitHub Container Registry
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        id: publish
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          tags=("sha-${GITHUB_SHA}")
-          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
-            tags+=(latest)
-          else
-            tags+=("$GITHUB_REF_NAME")
+          version=$(tr -d '\r\n' < VERSION)
+          [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          tags=(edge "sha-${GITHUB_SHA}" "sha-${GITHUB_SHA::7}")
+          if ! git show-ref --verify --quiet "refs/tags/v$version"; then
+            tags+=("$version" "${version%.*}" "v$version" latest)
+            echo "release=v$version" >> "$GITHUB_OUTPUT"
           fi
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           refs=()
@@ -43,3 +54,9 @@ jobs:
             refs+=(-t "$image:$tag")
           done
           docker buildx build --platform linux/amd64 --provenance=false --push "${refs[@]}" .
+      - name: Create GitHub Release
+        if: steps.publish.outputs.release != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.publish.outputs.release }}
+        run: gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes

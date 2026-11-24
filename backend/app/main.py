@@ -25,7 +25,8 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Полка", version="0.1.0", lifespan=lifespan, docs_url=None, redoc_url=None)
+version_file = Path(os.getenv("POLKA_VERSION_FILE", Path(__file__).resolve().parents[2] / "VERSION"))
+app = FastAPI(title="Полка", version=version_file.read_text().strip(), lifespan=lifespan, docs_url=None, redoc_url=None)
 app.include_router(auth.router)
 app.include_router(catalog.router)
 app.include_router(authors.router)
