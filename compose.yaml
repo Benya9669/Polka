@@ -1,0 +1,88 @@
+name: polka
+x-app-env: &app-env
+  APP_URL: ${APP_URL:-http://localhost:8080}
+  SETUP_KEY: ${SETUP_KEY:-}
+  DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://ebook:ebook@db/ebook}
+  REDIS_URL: ${REDIS_URL-redis://redis:6379/0}
+  LIBRARY_PATH: ${LIBRARY_PATH:-/data}
+  IMPORT_PATH: ${IMPORT_PATH:-/inbox}
+  ORIGINALS_PATH: ${ORIGINALS_PATH:-}
+  EXPORT_PATH: ${EXPORT_PATH:-}
+  TZ: ${TZ:-Europe/Moscow}
+  OPDS_PRIVATE_ALLOW: ${OPDS_PRIVATE_ALLOW:-}
+  MAX_BOOK_BYTES: ${MAX_BOOK_BYTES:-104857600}
+  WEB_ROOT: /app/web
+x-app-volumes: &app-volumes
+  - data:/data
+  - type: bind
+    source: ${BOOKS_INBOX:-./inbox}
+    target: ${IMPORT_PATH:-/inbox}
+    read_only: true
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ebook
+      POSTGRES_USER: ebook
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ebook}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ebook -d ebook"]
+      interval: 3s
+      timeout: 4s
+      retries: 20
+    restart: unless-stopped
+  redis:
+    image: redis:8.6-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "16mb"]
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 96m
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+  app:
+    image: polka-local:0.1
+    build: .
+    environment:
+      <<: *app-env
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS-127.0.0.1}
+    volumes: *app-volumes
+    command: ["sh", "-ec", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --no-access-log"]
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 15
+    restart: unless-stopped
+    mem_limit: 768m
+    security_opt:
+      - no-new-privileges:true
+  worker:
+    image: polka-local:0.1
+    pull_policy: never
+    environment: *app-env
+    volumes: *app-volumes
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 1024m
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  data:
+  postgres:
+
