@@ -48,7 +48,7 @@ services:
     security_opt:
       - no-new-privileges:true
   app:
-    image: polka-local:0.1
+    image: ${POLKA_IMAGE:-polka-local:0.1}
     build: .
     environment:
       <<: *app-env
@@ -70,7 +70,7 @@ services:
     security_opt:
       - no-new-privileges:true
   worker:
-    image: polka-local:0.1
+    image: ${POLKA_IMAGE:-polka-local:0.1}
     pull_policy: never
     environment: *app-env
     volumes: *app-volumes

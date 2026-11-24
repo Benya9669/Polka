@@ -21,6 +21,27 @@ Docker сохраняет базу и файлы в томах. Остановк
 
 ## Документация
 
+### Запуск готового образа из GHCR
+
+Для Windows с Docker Desktop в режиме Linux-контейнеров или Linux на x86-64 добавьте в файл `.env` рядом с `compose.yaml` строку:
+
+```dotenv
+POLKA_IMAGE=ghcr.io/benya9669/polka:latest
+```
+
+Из папки проекта выполните обе команды. Они подходят и для обновления.
+
+```sh
+docker compose pull app db redis
+docker compose up -d --no-build --wait
+```
+
+Сервер и обработчик задач используют один образ. При закрытом доступе к пакету сначала выполните `docker login ghcr.io` с именем пользователя GitHub и персональным токеном (classic) с правом `read:packages`.
+
+GitHub Actions собирает образ при pull request в `main`. При отправке коммита в `main` публикуются теги `latest` и `sha-<полный SHA коммита>`. Git-тег версии вида `v1.2.3` публикует соответствующий тег образа. Сборку можно также запустить вручную в разделе Actions.
+
+### Руководства
+
 - [Архитектура](docs/architecture.md)
 - [Установка на Windows и Debian 13](docs/installation.md)
 - [Настройки и NPMPlus](docs/configuration.md)
