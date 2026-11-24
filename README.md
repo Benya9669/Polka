@@ -1,4 +1,4 @@
-# Полка
+# <img src="frontend/public/assets/polka-mark.svg" width="40" height="40" alt=""> Полка
 
 Самостоятельная электронная библиотека для Windows с Docker Desktop и Linux с Docker Engine. Интерфейс доступен на русском и английском. Документация на русском.
 

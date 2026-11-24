@@ -31,6 +31,13 @@ export function message(error: unknown) {
   return error instanceof Error ? t(error.message) : t("Не удалось выполнить операцию");
 }
 
+function Brand({to}: {to: string}) {
+  return <Link className="brand" to={to}>
+    <img src="/assets/polka-mark.svg" width="36" height="36" alt=""/>
+    <span>{t("Полка")}</span>
+  </Link>;
+}
+
 function SignIn({setup, requireKey}: {setup: boolean; requireKey: boolean}) {
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -52,7 +59,7 @@ function SignIn({setup, requireKey}: {setup: boolean; requireKey: boolean}) {
   }
   return <main className="gate">
     <section className="gate-intro">
-      <Link className="brand" to="/"><BookOpen aria-hidden />{t(" Полка")}</Link>
+      <Brand to="/"/>
       <h1>{setup ? t("Ваша библиотека") : t("Снова за книгой")}</h1>
       <p>{setup ? t("Создайте учётную запись администратора, чтобы добавить первую книгу.") : t("Войдите в свою библиотеку, чтобы продолжить чтение.")}</p>
     </section>
@@ -115,7 +122,7 @@ function App() {
   if (offline && !/^\/(?:offline\/?|read\/\d+\/?)$/.test(location.pathname)) return <Navigate to="/offline" replace/>;
   return <ToastProvider key={user.id}><div className="shell">
     <aside className="sidebar">
-      <Link className="brand" to={offline ? '/offline' : '/home'}><BookOpen aria-hidden />{t(" Полка")}</Link>
+      <Brand to={offline ? '/offline' : '/home'}/>
       <nav aria-label={t("Разделы")}>{nav.map(([to, label, Icon]) => <NavLink key={to} to={to} end={to === '/' || to === '/sources'}>
         <Icon aria-hidden size={18}/><span>{label}</span></NavLink>)}</nav>
       <div className="account">{user.username}</div>
