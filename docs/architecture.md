@@ -45,7 +45,7 @@ HTTP-контракт опубликован в OpenAPI. Спецификаци�
 $env:APP_PORT = '18081'
 $env:APP_URL = 'http://localhost:18081'
 $env:APP_BIND = '127.0.0.1'
-docker compose -p polka-bench up -d --build --wait app
+docker compose -p polka-bench up -d --wait app
 Get-Content -Raw scripts/benchmark-catalog.py | docker compose -p polka-bench exec -T app python - --size 30000
 docker compose -p polka-bench stop
 ```

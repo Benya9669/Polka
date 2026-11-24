@@ -48,8 +48,7 @@ services:
     security_opt:
       - no-new-privileges:true
   app:
-    image: ${POLKA_IMAGE:-polka-local:0.1}
-    build: .
+    image: ${POLKA_IMAGE:-ghcr.io/benya9669/polka:latest}
     environment:
       <<: *app-env
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS-127.0.0.1}
@@ -70,8 +69,7 @@ services:
     security_opt:
       - no-new-privileges:true
   worker:
-    image: ${POLKA_IMAGE:-polka-local:0.1}
-    pull_policy: never
+    image: ${POLKA_IMAGE:-ghcr.io/benya9669/polka:latest}
     environment: *app-env
     volumes: *app-volumes
     command: ["python", "-m", "app.worker"]

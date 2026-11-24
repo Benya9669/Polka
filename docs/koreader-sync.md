@@ -36,8 +36,8 @@ $checks = Join-Path $PWD.Path 'scripts'
 New-Item -ItemType Directory -Force -Path $fixtures | Out-Null
 $archive = 'koreader-linux-x86_64-v2026.07.1.tar.xz'
 curl.exe --fail --location --output (Join-Path $fixtures $archive) "https://github.com/koreader/koreader/releases/download/v2026.07.1/$archive"
-docker compose -p polka-kosync up -d --build --wait app
-docker run --rm --network polka-kosync_default --mount "type=bind,src=$fixtures,dst=/fixture,readonly" --mount "type=bind,src=$checks,dst=/checks,readonly" --env POLKA_SMOKE_ADMIN --env POLKA_SMOKE_PASSWORD polka-local:0.1 python /checks/check-koreader.py "/fixture/$archive"
+docker compose -p polka-kosync up -d --wait app
+docker run --rm --network polka-kosync_default --mount "type=bind,src=$fixtures,dst=/fixture,readonly" --mount "type=bind,src=$checks,dst=/checks,readonly" --env POLKA_SMOKE_ADMIN --env POLKA_SMOKE_PASSWORD ghcr.io/benya9669/polka:latest python /checks/check-koreader.py "/fixture/$archive"
 docker compose -p polka-kosync stop
 Remove-Item Env:POLKA_SMOKE_PASSWORD
 ```

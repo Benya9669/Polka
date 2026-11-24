@@ -21,7 +21,7 @@
 
 Изменение `POSTGRES_PASSWORD` после инициализации тома само по себе не меняет пароль существующего пользователя БД. Для нового сетевого развёртывания настройте секреты до первого старта.
 
-Штатный Redis доступен в сети Compose. Для внешнего Redis укажите URL и выделите отдельную базу для экземпляра «Полки». Можно задать `REDIS_URL=` и запустить `docker compose up -d --build --wait app worker`, чтобы обработчик проверял очередь напрямую в PostgreSQL. Такой же режим включается при временной недоступности Redis. [Формат URL Redis](https://redis.io/docs/latest/develop/clients/connection-urls/)
+Штатный Redis доступен в сети Compose. Для внешнего Redis укажите URL и выделите отдельную базу для экземпляра «Полки». Можно задать `REDIS_URL=` и запустить `docker compose up -d --wait app worker`, чтобы обработчик проверял очередь напрямую в PostgreSQL. Такой же режим включается при временной недоступности Redis. [Формат URL Redis](https://redis.io/docs/latest/develop/clients/connection-urls/)
 
 ## Пути к книгам и данным
 

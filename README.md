@@ -7,7 +7,7 @@
 Откройте PowerShell или терминал в папке проекта и запустите:
 
 ```sh
-docker compose up -d --build --wait
+docker compose up -d --wait
 ```
 
 Откройте [http://localhost:8080](http://localhost:8080), создайте администратора и добавьте управляемую библиотеку. Через раздел «Библиотеки» загрузите EPUB, PDF или FB2. Для FB2 появится задача конвертации. После её завершения EPUB будет доступен на странице книги.
@@ -23,7 +23,7 @@ Docker сохраняет базу и файлы в томах. Остановк
 
 ### Запуск готового образа из GHCR
 
-Для Windows с Docker Desktop в режиме Linux-контейнеров или Linux на x86-64 добавьте в файл `.env` рядом с `compose.yaml` строку:
+Compose использует готовый образ GHCR для Linux x86-64. Ниже приведено значение по умолчанию. Чтобы закрепить другую версию, укажите её тег в `.env`.
 
 ```dotenv
 POLKA_IMAGE=ghcr.io/benya9669/polka:latest
@@ -32,8 +32,8 @@ POLKA_IMAGE=ghcr.io/benya9669/polka:latest
 Из папки проекта выполните обе команды. Они подходят и для обновления.
 
 ```sh
-docker compose pull app db redis
-docker compose up -d --no-build --wait
+docker compose pull
+docker compose up -d --wait
 ```
 
 Сервер и обработчик задач используют один образ. При закрытом доступе к пакету сначала выполните `docker login ghcr.io` с именем пользователя GitHub и персональным токеном (classic) с правом `read:packages`.

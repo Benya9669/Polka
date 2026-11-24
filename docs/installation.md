@@ -15,10 +15,10 @@ wsl --update
 winget install --exact --id Docker.DockerDesktop --source winget
 ```
 
-Запустите Docker Desktop и проверьте `docker version`. Сборка приложения скачивает образы и зависимости. Для работы локального каталога после сборки доступ к сторонним сервисам не нужен.
+Запустите Docker Desktop и проверьте `docker version`. При первом запуске Docker скачает готовые образы.
 
 ```powershell
-docker compose up -d --build --wait
+docker compose up -d --wait
 docker compose ps
 ```
 
@@ -42,7 +42,7 @@ mkdir -p inbox
   } > .env
 )
 docker compose config --quiet
-docker compose up -d --build --wait
+docker compose up -d --wait
 docker compose ps
 ```
 
