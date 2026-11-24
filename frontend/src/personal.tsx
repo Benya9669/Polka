@@ -4,7 +4,7 @@ import {BookCheck, Heart} from 'lucide-react';
 import {useState} from 'react';
 import {Link, useParams, useSearchParams} from 'react-router-dom';
 import {api, json, type Work} from './api';
-import {BookGrid, Cover} from './library';
+import {BookGrid, BookLink, Cover} from './library';
 import {message, Notice} from './main';
 import {useToast} from './toasts';
 
@@ -86,8 +86,8 @@ function ReadingCards({items}: {items: ShelfItem[]}) {
     const file = book.editions.flatMap(edition => edition.files).find(part => part.id === state.last_file_id);
     const href = file && ['epub', 'pdf'].includes(file.format) ? '/read/' + file.id : '/books/' + book.id;
     return <li key={book.id}>
-      <Link className="book-link" to={'/books/' + book.id}><Cover book={book}/>
-        <strong>{book.title}</strong><span>{book.authors.join(', ') || t("Автор не указан")}</span></Link>
+      <BookLink className="book-link" id={book.id}><Cover book={book}/>
+        <strong>{book.title}</strong><span>{book.authors.join(', ') || t("Автор не указан")}</span></BookLink>
       {state.percentage !== null && <div className="reading-card-info">
         <progress aria-label={t("Прогресс: ") + book.title} value={state.percentage} max={1}/>
         <small>{Math.round(state.percentage * 100)}%{state.last_read && ' · ' + date(state.last_read)}</small>
@@ -144,7 +144,7 @@ export function ActivityPage() {
     {query.isPending && <div className="shelf-loading" role="status" aria-label={t("Загружаем историю")}/>}
     {query.data?.length === 0 && page === 1 && <p>{t("Сеансы чтения появятся после открытия EPUB или PDF.")}</p>}
     <ul className="rows">{query.data?.slice(0, pageSize).map((item, index) => <li key={item.file_id + ':' + index}>
-      <div><Link to={'/books/' + item.work_id}>{item.title}</Link>
+      <div><BookLink id={item.work_id}>{item.title}</BookLink>
         <small>{date(item.opened)} · {item.seconds < 60 ? item.seconds + t(" сек") : Math.floor(item.seconds / 60) + t(" мин")}</small></div>
       <Link className="button" to={'/read/' + item.file_id}>{t("Открыть")}</Link>
     </li>)}</ul>

@@ -14,7 +14,8 @@ export function OfflineShelf({user}: {user: User}) {
   const result = useQuery({queryKey:['offline-files',user.id], queryFn:() => savedFiles(user.id), networkMode:'always', enabled:supported});
   return <>
     <header className="heading"><div><h1>{t("Книги без сети")}</h1><p>{user.username}</p></div></header>
-    {!supported && <Notice>{t("Откройте Полку через HTTPS или localhost, чтобы сохранять книги в браузере.")}</Notice>}
+    {!supported && <Notice>{t("Откройте Полку через HTTPS или localhost, чтобы сохранять книги в браузере.")}{' '}
+      <a href="https://github.com/Benya9669/Polka/blob/main/docs/configuration.md">{t("Настройка HTTPS")}</a></Notice>}
     {supported && result.isPending && <p role="status">{t("Открываем сохранённые книги…")}</p>}
     {(error || result.error) && <Notice error>{error || message(result.error)}</Notice>}
     {result.data?.length === 0 && <section className="empty"><h2>{t("Сохранённых книг пока нет")}</h2><p>{t("Откройте EPUB или PDF и нажмите «Сохранить без сети».")}</p></section>}

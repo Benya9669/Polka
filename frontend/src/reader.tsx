@@ -7,7 +7,7 @@ import {Bookmark as BookmarkIcon, ChevronLeft, ChevronRight, Maximize, Minus, Pl
 import {getDocument, GlobalWorkerOptions, type PDFDocumentProxy} from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {Link, useParams} from 'react-router-dom';
+import {Link, useLocation, useParams} from 'react-router-dom';
 import {api, ApiError, forUser, json, type Point, type Position, type User} from './api';
 import {message, Notice} from './main';
 import {chapterAt, chapterStarts, flattenChapters, type Chapter} from './reader-chapters';
@@ -401,6 +401,17 @@ function PdfView({fileId, userId, content, start, update, register, zoom, onErro
 }) {
   const [document, setDocument] = useState<PDFDocumentProxy>();
   const [page, setPage] = useState(Number(start) || 1);
+  const [textMode, setTextMode] = useState(false);
+  const [pageText, setPageText] = useState<string>();
+  useEffect(() => {
+    setPageText(undefined);
+    if (!textMode || !document) return;
+    let active = true;
+    void document.getPage(page).then(data => data.getTextContent()).then(content => {
+      if (active) setPageText(content.items.map(item => 'str' in item ? item.str + (item.hasEOL ? '\n' : ' ') : '').join('').trim());
+    }).catch(error => {if (active) onError(message(error));});
+    return () => {active = false;};
+  }, [document, page, textMode, onError]);
   const currentPage = useRef(page);
   currentPage.current = page;
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -484,10 +495,18 @@ function PdfView({fileId, userId, content, start, update, register, zoom, onErro
     void timer().catch(error => {if (active) onError(message(error));});
     return () => {active = false;};
   }, [document, needle, onFound, onError]);
-  return <div className="pdf-canvas" ref={pane}><canvas aria-label={t("Страница ") + page} ref={canvas}/></div>;
+  return <><button type="button" aria-pressed={textMode} onClick={() => setTextMode(!textMode)}>{t("Текстовый вид PDF")}</button>
+    <div className="pdf-canvas" ref={pane}>
+      <canvas hidden={textMode} aria-label={t("Страница ") + page} ref={canvas}/>
+      {textMode && <article tabIndex={0} aria-label={t("Страница ") + page} className="pdf-text" style={{fontSize:zoom+'em'}}>
+        <h2 aria-live="polite">{t("Страница ") + page}</h2>
+        <p>{pageText === undefined ? t("Загрузка…") : pageText || t("На этой странице нет текстового слоя. Для чтения скана требуется OCR.")}</p>
+      </article>}
+    </div></>;
 }
 
 function ReadingSession({file, user, initial, offline, copy}: {file: Info; user: User; initial: Position; offline: boolean; copy?: SavedBook}) {
+  const bookOrigin = useLocation().state?.bookOrigin;
   const client = useQueryClient();
   const progress = useProgress(file.id, initial, user);
   const content = useRef(copy?.content).current;
@@ -558,7 +577,8 @@ function ReadingSession({file, user, initial, offline, copy}: {file: Info; user:
       await api('/reading/bookmarks/' + file.id + (mark ? '/' + mark : ''), forUser(user.id,json(method,
         label && progress.point ? {label, locator: progress.point.locator} : undefined)));
       await marks.refetch();
-    } catch (e) {setError(message(e));}
+      return true;
+    } catch (e) {setError(message(e)); return false;}
   }
   async function manageAnnotation(verb: string, id?: number, data?: object) {
     setAnnotating(true);
@@ -570,12 +590,15 @@ function ReadingSession({file, user, initial, offline, copy}: {file: Info; user:
     } catch (e) {setError(message(e)); return false;} finally {setAnnotating(false);}
   }
   return <section className="reader" data-theme={theme} ref={region}>
-    <header className="reader-heading"><Link className="back" to={offline ? '/offline' : '/books/' + file.work_id}>
+    <header className="reader-heading"><Link className="back" state={offline ? undefined : bookOrigin} to={offline ? '/offline' : '/books/' + file.work_id}>
       <ChevronLeft size={16}/> {offline ? t("Книги без сети") : t("К книге")}</Link><h1>{file.title}</h1></header>
     <div className="reader-tools">
       <div className="actions">
         <button disabled={!ready} onClick={() => controller.current?.previous()} aria-label={t("Предыдущая страница")}><ChevronLeft size={18}/></button>
         <button disabled={!ready} onClick={() => controller.current?.next()} aria-label={t("Следующая страница")}><ChevronRight size={18}/></button>
+      </div>
+      <details className="reader-options" open={window.matchMedia('(min-width: 861px)').matches}>
+        <summary>{t("Инструменты чтения")}</summary><div className="actions">
         <button aria-label={pdf ? t("Уменьшить масштаб") : t("Уменьшить шрифт")} onClick={() => pdf ? setZoom(v => Math.max(.5, v-.15)) : setFont(v => Math.max(75, v-10))}><Minus size={17}/></button>
         <button aria-label={pdf ? t("Увеличить масштаб") : t("Увеличить шрифт")} onClick={() => pdf ? setZoom(v => Math.min(3, v+.15)) : setFont(v => Math.min(225, v+10))}><Plus size={17}/></button>
         {!pdf && <select aria-label={t("Режим чтения")} value={flow ? 'scroll' : 'page'} onChange={event => {
@@ -598,6 +621,7 @@ function ReadingSession({file, user, initial, offline, copy}: {file: Info; user:
           } catch (e) {setError(message(e));} finally {setSavingCopy(false);}
         }}>{savingCopy ? t("Сохраняем копию…") : t("Сохранить без сети")}</button>}
         {supported && !offline && local.data && <Link className="button" to="/offline">{t("Копия сохранена")}</Link>}
+        {!supported && !window.isSecureContext && <small>{t("Для сохранения без сети откройте сервер через HTTPS.")} <Link to="/offline">{t("Книги без сети")}</Link></small>}
         {document.fullscreenEnabled && <button aria-label={t("Полноэкранный режим")} onClick={() => {
           const action = document.fullscreenElement ? document.exitFullscreen() : region.current?.requestFullscreen();
           void action?.catch(e => setError(message(e)));
@@ -642,6 +666,7 @@ function ReadingSession({file, user, initial, offline, copy}: {file: Info; user:
           <button className="text-button" onClick={() => controller.current?.go(hit.cfi)}>{hit.excerpt}</button>
         </li>)}</ul>
       </details>}
+      </details>
     </div>
     {error && <Notice error>{error}</Notice>}
     {nativeVisible && initial.alternate && <div className="notice">
@@ -701,9 +726,9 @@ function ReadingSession({file, user, initial, offline, copy}: {file: Info; user:
     </div>}
     {marksOpen && <section className="panel">
       <h2>{t("Закладки")}</h2>
-      {!offline && <form className="filters" onSubmit={event => {
+      {!offline && <form className="filters" onSubmit={async event => {
         event.preventDefault(); const form = event.currentTarget; const label = String(new FormData(form).get('label'));
-        void manageMark('POST', undefined, label); form.reset();
+        if (await manageMark('POST', undefined, label)) form.reset();
       }}><input name="label" aria-label={t("Название закладки")} placeholder={t("Название закладки")} required maxLength={200}/>
         <button disabled={!progress.point}>{t("Добавить")}</button></form>}
       <ul className="rows">{marks.data?.map(mark => <li key={mark.id}>

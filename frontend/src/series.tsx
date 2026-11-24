@@ -4,7 +4,7 @@ import {useState} from 'react';
 import {Link, useParams, useSearchParams} from 'react-router-dom';
 import {api, type SeriesMembership, type Work} from './api';
 import {Pagination} from './authors';
-import {useLibraries} from './library';
+import {BookLink, useLibraries} from './library';
 import {message, Notice} from './main';
 
 type Branch = {id: number; parent_id: number | null; library_id: number; name: string; path: string[]};
@@ -79,7 +79,7 @@ export function SeriesDetail() {
       <ul className="rows">{branch.books.map(book => {
         const position = book.series_memberships.find(entry => entry.id === branch.id)?.position;
         return <li key={book.id}>
-          <div><strong><Link to={'/books/' + book.id}>{book.title}</Link></strong><small>{book.authors.join(', ')}</small></div>
+          <div><strong><BookLink id={book.id}>{book.title}</BookLink></strong><small>{book.authors.join(', ')}</small></div>
           {position && <span>{t("Том ")}{position}</span>}
         </li>;
       })}</ul>

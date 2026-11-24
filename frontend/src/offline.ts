@@ -31,19 +31,42 @@ function requestResult<T>(request: IDBRequest<T>) {
   });
 }
 
-async function books<T>(mode: IDBTransactionMode, operation: (store: IDBObjectStore) => Promise<T>): Promise<T> {
-  const opening = indexedDB.open('polka-offline', 1);
-  opening.onupgradeneeded = () => opening.result.createObjectStore('books', {keyPath:['userId','fileId']}).createIndex('owner','userId');
+async function stored<T>(name: 'books' | 'reviews', mode: IDBTransactionMode, operation: (store: IDBObjectStore) => Promise<T>): Promise<T> {
+  const opening = indexedDB.open(name === 'books' ? 'polka-offline' : 'polka-upload-reviews', 1);
+  opening.onupgradeneeded = () => opening.result.createObjectStore(name, name === 'books'
+    ? {keyPath:['userId','fileId']} : {keyPath:'id', autoIncrement:true}).createIndex('owner','userId');
   const db = await requestResult(opening);
   try {
-    const transaction = db.transaction('books', mode);
+    const transaction = db.transaction(name, mode);
     const complete = new Promise<void>((resolve, reject) => {
       transaction.oncomplete = () => resolve();
       transaction.onabort = () => reject(transaction.error);
     });
-    const [result] = await Promise.all([operation(transaction.objectStore('books')), complete]);
+    const [result] = await Promise.all([operation(transaction.objectStore(name)), complete]);
     return result;
   } finally { db.close(); }
+}
+
+function books<T>(mode: IDBTransactionMode, operation: (store: IDBObjectStore) => Promise<T>) {
+  return stored('books', mode, operation);
+}
+
+export type UploadReview = {id:number; userId:number; file:File; library:number; choice?:string;
+  matches:{work_id:number; title:string; reason:string}[]};
+export function uploadReviews(userId:number): Promise<UploadReview[]> {
+  return stored('reviews', 'readonly', store => requestResult(store.index('owner').getAll(userId)));
+}
+export function saveReview(review: Omit<UploadReview,'id'>) {
+  return stored('reviews', 'readwrite', store => requestResult(store.add(review)));
+}
+export function chooseReview(id:number, userId:number, choice:string) {
+  return stored('reviews', 'readwrite', async store => {
+    const row: UploadReview | undefined = await requestResult(store.get(id));
+    if (row?.userId === userId) await requestResult(store.put({...row,choice}));
+  });
+}
+export function deleteReview(id:number) {
+  return stored('reviews', 'readwrite', store => requestResult(store.delete(id)));
 }
 
 export function savedBook(userId: number, fileId: number) {

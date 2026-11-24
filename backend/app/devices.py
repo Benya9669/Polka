@@ -3,16 +3,17 @@ import tempfile
 from pathlib import Path
 from zipfile import ZIP_STORED, ZipFile
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import case, select
 
 from .auth import Current, DB
 from .books import copy_limited, save_atomic, under
-from .catalog import file_or_404, job_json, queue
+from .author_names import catalog_search
+from .catalog import file_or_404, job_json, queue, visible_work
 from .conversions import SONY_TARGETS, convert_file
-from .db import DATA, EXPORTS, Edition, Job, PositionEvent, SonyPosition, Work, now
+from .db import DATA, EXPORTS, BookFile, Edition, Job, Library, PositionEvent, SonyPosition, Work, now
 from .personal import lock_reader, record_reading
 
 router = APIRouter(prefix="/api/v1/devices/sony", tags=["Sony PRS-600"])
@@ -50,6 +51,21 @@ def plan_entry(file, work, target):
 def package_path(task):
     relative = f"sony/{task.owner_id}/{task.id}.zip"
     return under(EXPORTS, relative) if EXPORTS is not None else under(DATA, f"exports/{relative}")
+
+
+@router.get("/selection")
+def selection(db: DB, user: Current, q: str = Query("", max_length=300), before: int | None = Query(None, gt=0)):
+    priority = case((BookFile.format == "epub", 0), (BookFile.format == "pdf", 1), else_=2)
+    preferred = (select(BookFile.id).join(Edition, Edition.id == BookFile.edition_id)
+                 .where(Edition.work_id == Work.id, BookFile.format.in_(SONY_TARGETS))
+                 .order_by(priority, BookFile.id).limit(1).correlate(Work).scalar_subquery())
+    query = (select(BookFile.id, Work.id.label("work_id"), Work.title, BookFile.format)
+             .select_from(Work).join(Library, Library.id == Work.library_id).join(BookFile, BookFile.id == preferred)
+             .where(*visible_work(user), *catalog_search(q)))
+    if before is not None:
+        query = query.where(Work.id < before)
+    rows = db.execute(query.order_by(Work.id.desc()).limit(201)).mappings().all()
+    return {"items": [dict(row) for row in rows[:200]], "next": rows[199]["work_id"] if len(rows) > 200 else None}
 
 
 @router.post("/preview")

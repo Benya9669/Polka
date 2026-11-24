@@ -18,6 +18,11 @@ test('Sony выбирает книги со всех страниц и разб�
     const url = new URL(route.request().url());
     let json: unknown = [];
     if (url.pathname.endsWith('/auth/me')) json = {id:1, username:'reader', admin:false};
+    if (url.pathname.endsWith('/selection')) {
+      const offset = Number(url.searchParams.get('before')) || 0;
+      json = {items:works.slice(offset,offset + 100).map(w=>({id:w.id,title:w.title,work_id:w.id,format:'epub'})),
+        next:offset ? null : 100};
+    }
     if (url.pathname.endsWith('/books')) {
       const limit = Number(url.searchParams.get('limit'));
       const offset = (Number(url.searchParams.get('page')) - 1) * limit;
@@ -64,10 +69,12 @@ test('переключает интерфейс на английский и с�
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
   await page.screenshot({path:testInfo.outputPath('settings-english-mobile.png')});
 
+  await page.getByRole('button',{name:'Menu',exact:true}).click();
   await page.getByRole('link',{name:'Search sources',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Search sources',exact:true})).toBeVisible();
   await expect(page.getByRole('searchbox',{name:'Search all catalogs'})).toBeVisible();
   await page.goto('/read/' + info.file.id);
+  await page.getByText('Reading tools',{exact:true}).click();
   await expect(page.getByLabel('Table of contents')).toBeVisible();
   await expect(page.getByRole('button',{name:'Save for offline reading'})).toBeVisible();
   await expect(page.frameLocator('.epub-canvas iframe').getByRole('heading',{name:'Глава 1'})).toBeVisible();
@@ -116,6 +123,7 @@ test('сохраняет тему интерфейса и открывает п�
     await route.fulfill({json:{items:[],has_next:false}});
   });
   try {
+    await page.getByRole('button',{name:'Меню',exact:true}).click();
     await page.getByRole('link',{name:'Все книги',exact:true}).click();
     await expect(page.locator('main').getByRole('status')).toHaveText('Загружаем каталог…');
     await expect(page.locator('.book-grid[aria-hidden=true] > li')).toHaveCount(6);
@@ -221,6 +229,7 @@ test('импортирует FB2 из внешнего OPDS и продолжа�
   await page.context().addCookies((await request.storageState()).cookies);
   await page.setViewportSize({width:390,height:844});
   await page.goto('/sources');
+  await page.getByRole('button',{name:'Меню',exact:true}).click();
   await page.getByRole('link',{name:'Поиск по источникам',exact:true}).click();
   await expect(page).toHaveURL(/\/sources\/search$/);
   await page.getByRole('searchbox',{name:'Поиск во всех каталогах'}).fill('Полярная книга');
@@ -230,6 +239,7 @@ test('импортирует FB2 из внешнего OPDS и продолжа�
   const searchResult = available.locator('.panel').filter({has:page.getByRole('heading',{name:suffix,exact:true})});
   await expect(searchResult.locator('.opds-matches a[href="/books/' + before.work_id + '"]')).toHaveText('Полярная книга');
   await searchResult.screenshot({path:testInfo.outputPath('opds-search-mobile.png')});
+  await page.getByRole('button',{name:'Меню',exact:true}).click();
   await page.getByRole('link',{name:'OPDS-каталоги',exact:true}).click();
   const open = () => page.locator('.source-list > li').filter({hasText:suffix}).getByRole('button',{name:'Открыть',exact:true}).click();
   await open();
@@ -351,11 +361,13 @@ test('открывает EPUB и PDF без сети после перезагр
     await page.locator('main').screenshot({path:testInfo.outputPath('offline-mobile.png')});
     await page.getByRole('link',{name:'offline-pdf',exact:true}).click();
     await expect(page.getByLabel('Страница 1',{exact:true})).toBeVisible();
+    await page.getByText('Инструменты чтения',{exact:true}).click();
     await page.getByLabel('Поиск по тексту книги').fill('searchable');
     await page.getByRole('button',{name:'Найти',exact:true}).click();
     await expect(page.getByText('Найдено на странице 1')).toBeVisible();
     await page.goto('/read/' + epub);
     await expect(chapter.getByRole('heading',{name:'Глава 1'})).toBeVisible();
+    await page.getByText('Инструменты чтения',{exact:true}).click();
     await page.getByLabel('Содержание').selectOption('two.xhtml');
     await expect(chapter.getByRole('heading',{name:'Глава 2'})).toBeVisible();
     await expect(page.locator('.reader-footer').getByRole('status')).toContainText('Позиция сохранена в браузере');
@@ -461,6 +473,7 @@ test('редактирует подсерии и показывает тома �
   const book = await record(title);
   await page.context().addCookies((await request.storageState()).cookies);
   await page.goto('/books/' + book);
+  await page.getByText('Управление книгой',{exact:true}).click();
   await page.getByRole('button',{name:'Редактировать метаданные'}).click();
   await page.getByRole('button',{name:'Добавить серию',exact:true}).click();
   await page.getByLabel('Название серии',{exact:true}).fill(root);
@@ -555,6 +568,7 @@ test('объединяет карточки после предпросмотр�
   const source = await record('Издание ' + run);
   await page.context().addCookies((await request.storageState()).cookies);
   await page.goto('/books/' + target.work_id);
+  await page.getByText('Управление книгой',{exact:true}).click();
   await page.getByRole('button', {name:'Объединить карточки'}).click();
   const merge = page.getByRole('region', {name:'Объединить карточки'});
   await merge.getByLabel('Найти вторую карточку').fill(source.title);
@@ -633,6 +647,44 @@ test('настраивает сканирование библиотеки с т
   await page.mouse.move(0, 0);
   await page.clock.fastForward(9_000);
   await expect(scheduleToast).toHaveCount(0);
+});
+
+test('сохраняет решение по дублю и возвращает читателя к фильтрам', async ({page, request, baseURL}) => {
+  if (new URL(baseURL!).origin !== 'http://localhost:18080') throw new Error('Требуется тестовый сервер');
+  const status = await request.get('/api/v1/auth/status').then(r => r.json());
+  expect((await request.post('/api/v1/auth/' + (status.setup ? 'setup' : 'login'),
+    {data:{username:'browserqa',password:'browser-qa-password'}})).ok()).toBeTruthy();
+  const lib = await request.post('/api/v1/libraries',{data:{name:'UX ' + Date.now(),mode:'managed'}}).then(r=>r.json());
+  const filename = 'draft-' + lib.id + '.txt';
+  await request.post('/api/v1/libraries/' + lib.id + '/upload',{multipart:{file:{
+    name:filename,mimeType:'text/plain',buffer:Buffer.from('first text')}}});
+  await page.context().addCookies((await request.storageState()).cookies);
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/libraries?upload=1&target='+lib.id);
+  await page.getByLabel('Файлы книг').setInputFiles({name:filename,mimeType:'text/plain',buffer:Buffer.from('new text')});
+  await page.getByRole('button',{name:'Загрузить файлы'}).click();
+  await expect(page.locator('select[name=work]')).toBeVisible();
+  await page.goto('/downloads');
+  await page.reload();
+  await page.getByRole('link',{name:filename,exact:true}).click();
+  const choice = page.locator('select[name=work]');
+  await choice.selectOption({index:1});
+  await page.getByRole('button',{name:'Сохранить',exact:true}).click();
+  await expect(choice).toHaveCount(0);
+  await page.goto('/?library_id='+lib.id);
+  await page.getByRole('button',{name:/Фильтры/}).click();
+  await page.getByLabel('Сортировка').selectOption('title');
+  await expect(page).toHaveURL(/sort=title/);
+  await page.locator('.book-grid .book-link').click();
+  await page.locator('main .back').click();
+  await expect(page).toHaveURL(new RegExp('library_id='+lib.id+'&sort=title'));
+  await page.goto('/?tag=missing-ux-tag');
+  await expect(page.getByRole('heading',{name:'Книги не найдены'})).toBeVisible();
+  await page.getByRole('button',{name:'Сбросить фильтры'}).click();
+  await expect(page.locator('.book-grid .book-link').first()).toBeVisible();
+  const entries = await request.get('/api/v1/books?library_id='+lib.id).then(r=>r.json());
+  expect(entries.items).toHaveLength(1);
+  expect(entries.items[0].editions).toHaveLength(2);
 });
 
 async function sample(chapterCount = 2) {
@@ -734,6 +786,7 @@ test('добавляет EPUB и продолжает чтение в друго
   await page.getByRole('link', {name:'Все книги', exact:true}).click();
 
   await page.getByRole('link', {name:'Добавить книги'}).click();
+  await page.getByRole('link',{name:'Управление библиотеками'}).click();
   const libraryName = 'Тест ' + Date.now();
   await page.getByLabel('Название', {exact:true}).fill(libraryName);
   await page.getByRole('button', {name:'Создать библиотеку'}).click();
@@ -799,6 +852,7 @@ test('добавляет EPUB и продолжает чтение в друго
     await phone.getByRole('button', {name:'Войти'}).click();
     await expect(phone.frameLocator('.epub-canvas iframe').getByRole('heading', {name:'Глава 2'})).toBeVisible();
     await expect(phone.locator('.reader-footer')).toContainText('Глава 2');
+    await phone.getByText('Инструменты чтения',{exact:true}).click();
     await phone.getByRole('button', {name:'Заметки', exact:true}).click();
     await expect(phone.getByText('Проверка выделения', {exact:true})).toBeVisible();
     expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -965,7 +1019,15 @@ test('читает увеличенный PDF в сенсорном профил
     const zoom = page.getByRole('button', {name:'Увеличить масштаб'});
     const next = page.getByRole('button', {name:'Следующая страница'});
     await expect(next).toBeEnabled();
+    const textView = page.getByRole('button',{name:'Текстовый вид PDF'});
+    await textView.click();
+    await expect(page.getByRole('article',{name:'Страница 1'})).toContainText('A searchable line');
+    await next.click();
+    await expect(page.getByRole('article',{name:'Страница 2'})).toContainText('A searchable line');
+    await page.getByRole('button',{name:'Предыдущая страница'}).click();
+    await textView.click();
     await expect.poll(() => canvas.evaluate(el => el.width / el.getBoundingClientRect().width)).toBeGreaterThan(1.9);
+    await page.getByText('Инструменты чтения',{exact:true}).click();
     expect((await zoom.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     if (process.env.EBOOK_CAPTURE) await page.screenshot({path:testInfo.outputPath('pdf-tablet-portrait.png'), scale:'css'});
     for (let index = 0; index < 4; index += 1) await zoom.tap();
@@ -1050,6 +1112,7 @@ test('подтверждает раскладку и восстанавлива�
   expect(await request.get('/api/v1/files/' + file.id).then(response => response.text())).toBe('Тестовое издание');
   await page.goto('/books/' + entry.work_id);
   page.once('dialog', dialog => dialog.accept());
+  await page.getByText('Управление книгой',{exact:true}).click();
   await page.getByRole('button', {name:'В корзину'}).click();
   await expect(page.getByRole('heading', {name:'Корзина'})).toBeVisible();
   expect((await request.get('/api/v1/files/' + file.id)).status()).toBe(404);
@@ -1099,6 +1162,7 @@ test('создаёт пакет Sony EPUB 2 и принимает ручную �
   await page.getByRole('button', {name:'Найти', exact:true}).click();
   await page.getByRole('checkbox', {name:'PDF · ' + pdfName}).check();
   await page.getByRole('button', {name:'Посмотреть план экспорта'}).click();
+  await page.getByText('Состав пакета',{exact:true}).click();
   await expect(page.getByText('EPUB → EPUB 2', {exact:true})).toBeVisible();
   await expect(page.getByText('PDF → PDF', {exact:true})).toBeVisible();
   await page.getByRole('button', {name:'Подготовить ZIP'}).click();

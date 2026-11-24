@@ -2,8 +2,9 @@ import {currentLanguage, t} from './locale';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, ChevronLeft, ChevronRight, FileUp, Search } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { api, bookExtensions, conversionTargets, json, type BookFile, type Job, type Library, type ScanSettings, type User, type Work } from './api';
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { api, bookExtensions, conversionTargets, forUser, json, type BookFile, type Job, type Library, type ScanSettings, type User, type Work } from './api';
+import {uploadReviews, saveReview, chooseReview, deleteReview, type UploadReview} from './offline';
 import { message, Notice } from './main';
 import { ReadingControls } from './personal';
 import { AccountSettings } from './account';
@@ -30,14 +31,25 @@ export function Cover({book}: {book: Work}) {
 
 export function BookGrid({books, selected, toggle}: {books: Work[]; selected?: number[]; toggle?: (id: number) => void}) {
   return <ul className="book-grid">{books.map(book => <li key={book.id}>
-    <Link className="book-link" to={'/books/' + book.id}>
+    <BookLink className="book-link" id={book.id}>
       <Cover book={book}/>
       <strong>{book.title}</strong>
       <span>{book.authors.join(', ') || t("Автор не указан")}</span>
-    </Link>
+    </BookLink>
     {toggle && <label className="check"><input type="checkbox" checked={selected?.includes(book.id) || false}
       aria-label={t("Выбрать ") + book.title} onChange={() => toggle(book.id)}/>{t(" Выбрать")}</label>}
   </li>)}</ul>;
+}
+
+export function BookLink({id, children, className}: {id:number; children:ReactNode; className?:string}) {
+  const from = useLocation();
+  const navigate = useNavigate();
+  const to = '/books/' + id;
+  return <Link className={className} to={to} onClick={event => {
+    if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    navigate(to, {state:{from:from.pathname + from.search, offset:window.scrollY}});
+  }}>{children}</Link>;
 }
 
 export function Catalog({user}: {user: User}) {
@@ -62,6 +74,16 @@ export function Catalog({user}: {user: User}) {
     queryFn: () => api<{items: Work[]; has_next: boolean}>('/books?' + params.toString())});
   const editable = !user.read_only && (user.admin || Boolean(library &&
     libraries.data?.some(entry => String(entry.id) === library && entry.owner_id === user.id)));
+  const active = ['q','library_id',...Object.keys(filters)].filter(key => params.get(key));
+  const [showFilters, setShowFilters] = useState(false);
+  function applyFilter(key:string, value:string) {
+    const next = new URLSearchParams(params);
+    next.delete('page');
+    if (key === 'library_id') for (const facet of Object.keys(filters)) next.delete(facet);
+    if (value) next.set(key,value); else next.delete(key);
+    setSelected([]);
+    setParams(next);
+  }
   useEffect(() => {
     function focusSearch(event: KeyboardEvent) {
       if (event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey ||
@@ -78,42 +100,33 @@ export function Catalog({user}: {user: User}) {
       <div className="actions">
         {editable && <button aria-pressed={selecting} onClick={() => {setSelecting(!selecting); setSelected([]);}}>
           {selecting ? t("Отменить выбор") : t("Выбрать книги")}</button>}
-        {!user.read_only && <Link className="button primary" to="/libraries"><FileUp size={18}/>{t(" Добавить книги")}</Link>}
+        {!user.read_only && <Link className="button primary" to="/libraries?upload=1"><FileUp size={18}/>{t(" Добавить книги")}</Link>}
       </div>
     </header>
     <form className="filters" onSubmit={event => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
-      const next = new URLSearchParams();
-      for (const [key, raw] of data) {
-        const value = String(raw).trim();
-        if (value) next.set(key, value);
-      }
-      setParams(next);
+      applyFilter('q', String(data.get('q') || '').trim());
     }}>
       <label className="search"><Search size={18} aria-hidden/><input ref={search} key={term} type="search" name="q" defaultValue={term}
         aria-label={t("Поиск по метаданным")} aria-keyshortcuts="Control+K Meta+K" placeholder={t("Название, автор или ISBN")}/></label>
       <button>{t("Найти")}</button>
-      <select aria-label={t("Библиотека")} name="library_id" value={library} onChange={event => {
-        setSelected([]);
-        const next = new URLSearchParams(params);
-        next.delete('page');
-        for (const key of Object.keys(filters)) next.delete(key);
-        if (event.target.value) next.set('library_id', event.target.value);
-        else next.delete('library_id');
-        setParams(next);
-      }}>
+      <button type="button" className="filter-toggle" aria-controls="catalog-filters" aria-expanded={showFilters} onClick={() => setShowFilters(!showFilters)}>{t("Фильтры")} ({active.filter(key => key !== 'q').length})</button>
+      <div id="catalog-filters" className="filter-options" data-open={showFilters}>
+      <select aria-label={t("Библиотека")} name="library_id" value={library} onChange={event => applyFilter('library_id', event.target.value)}>
         <option value="">{t("Все библиотеки")}</option>{libraries.data?.map(lib => <option value={lib.id} key={lib.id}>{lib.name}</option>)}
       </select>
-      <select key={params.get('sort')} name="sort" aria-label={t("Сортировка")} defaultValue={params.get('sort') || ''}>
+      <select name="sort" aria-label={t("Сортировка")} value={params.get('sort') || ''} onChange={event => applyFilter('sort', event.target.value)}>
         <option value="">{t("Сначала новые")}</option><option value="title">{t("По названию")}</option><option value="oldest">{t("Сначала старые")}</option>
       </select>
       {(Object.entries(filters) as [keyof typeof filters, string][]).map(([key, label]) => {
         const selectedValue = params.get(key) || '';
         const entries = Array.from(new Set([selectedValue, ...(values[key] || [])])).filter(Boolean);
-        return <select key={key + ':' + selectedValue} name={key} aria-label={label} defaultValue={selectedValue}>
+        return <select key={key} name={key} aria-label={label} value={selectedValue} onChange={event => applyFilter(key,event.target.value)}>
           <option value="">{label}</option>{entries.map(option => <option key={option}>{option}</option>)}</select>;
       })}
+      </div>
+      {active.length > 0 && <button type="button" onClick={() => {setSelected([]); setParams({});}}>{t("Сбросить фильтры")}</button>}
     </form>
     {notice && <Notice error={notice.error}>{notice.text}</Notice>}
     {selecting && editable && <form className="panel fields" onSubmit={async event => {
@@ -158,9 +171,9 @@ export function Catalog({user}: {user: User}) {
     </div> : result.error ? <Notice error>{message(result.error)}</Notice>
       : result.data.items.length ? <BookGrid books={result.data.items} selected={selected} toggle={selecting && editable ? id =>
         setSelected(previous => previous.includes(id) ? previous.filter(item => item !== id) : [...previous, id].slice(0, 100)) : undefined}/> : <section className="empty">
-        <BookOpen size={32} aria-hidden/><h2>{term ? t("Книги не найдены") : t("Здесь появятся книги")}</h2>
-        <p>{term ? t("Попробуйте изменить запрос или выбрать другую библиотеку.") : t("Загрузите файл или подключите папку с книгами.")}</p>
-        {!term && <Link to="/libraries" className="button">{t("Открыть библиотеки")}</Link>}
+        <BookOpen size={32} aria-hidden/><h2>{active.length ? t("Книги не найдены") : t("Здесь появятся книги")}</h2>
+        <p>{active.length ? t("Попробуйте изменить запрос или выбрать другую библиотеку.") : t("Загрузите файл или подключите папку с книгами.")}</p>
+        {!active.length && <Link to="/libraries?upload=1" className="button">{t("Открыть библиотеки")}</Link>}
       </section>}
     {(page > 1 || result.data?.has_next) && <div className="pager">
       <button disabled={page === 1} onClick={() => setParams({...Object.fromEntries(params), page: String(page - 1)})}><ChevronLeft size={16}/>{t(" Назад")}</button>
@@ -171,6 +184,7 @@ export function Catalog({user}: {user: User}) {
 }
 
 export function WorkPage({user}: {user: User}) {
+  const origin = useLocation().state;
   const notify = useToast();
   const {id} = useParams();
   const navigate = useNavigate();
@@ -182,12 +196,16 @@ export function WorkPage({user}: {user: User}) {
   const [binding, setBinding] = useState<number>();
   const [notice, setNotice] = useState<{text: string; error?: boolean}>();
   const [busy, setBusy] = useState(false);
+  const reading = useQuery({queryKey:['reading-state',Number(id)], queryFn:() => api<{last_file_id:number|null}>('/reading/states/' + id)});
   if (!book.data) return book.error ? <Notice error>{message(book.error)}</Notice> : <p>{t("Открываем книгу…")}</p>;
   const work = book.data;
   if (String(work.id) !== id) return <Navigate to={'/books/' + work.id} replace/>;
   const library = libs.data?.find(l => l.id === work.library_id);
   const own = !user.read_only && (user.admin || library?.owner_id === user.id);
   const files = work.editions.flatMap(e => e.files);
+  const readable = files.filter(f => ['epub','pdf'].includes(f.format));
+  const last = readable.find(f => f.id === reading.data?.last_file_id);
+  const preferred = last || readable.find(f => f.format === 'epub') || readable[0];
   async function perform(action: () => Promise<unknown>, text: string) {
     setBusy(true);
     setNotice(undefined);
@@ -204,7 +222,7 @@ export function WorkPage({user}: {user: User}) {
     }
   }
   return <>
-    <Link className="back" to="/"><ChevronLeft size={16}/>{t(" Все книги")}</Link>
+    <Link className="back" to={origin?.from || '/'} state={{restoreScroll:origin?.offset}}><ChevronLeft size={16}/>{origin?.from ? t("Назад") : t("Все книги")}</Link>
     <section className="book-detail"><Cover book={work}/><div>
       <h1>{work.title}</h1><p className="byline">{work.author_credits.map((credit, index) => <span key={index}>
         {index > 0 && ', '}{credit.id ? <Link to={'/authors/' + credit.id} title={credit.name}>{credit.credited_as}</Link> : credit.credited_as}
@@ -216,9 +234,10 @@ export function WorkPage({user}: {user: User}) {
       {work.tags.length > 0 && <p>{work.tags.map(tag => <Link key={tag} className="book-tag" to={'/?tag=' + encodeURIComponent(tag)}>{tag}</Link>)}</p>}
       {Object.keys(work.custom_fields).length > 0 && <dl>{Object.entries(work.custom_fields).map(([key, value]) =>
         <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl>}
+      {preferred && <Link className="button primary" to={'/read/' + preferred.id} state={{bookOrigin:origin}}>{last ? t("Продолжить") : t("Читать")}</Link>}
       <ReadingControls key={work.id} work={work}/>
       {work.editions.find(e => e.summary)?.summary && <p className="summary">{work.editions.find(e => e.summary)?.summary}</p>}
-      {own && <div className="actions">
+      {own && <details><summary>{t("Управление книгой")}</summary><div className="actions">
         <button onClick={() => setEditing(!editing)}>{editing ? t("Закрыть редактор") : t("Редактировать метаданные")}</button>
         <button aria-expanded={merging} onClick={() => setMerging(!merging)}>{merging ? t("Закрыть объединение") : t("Объединить карточки")}</button>
         {library?.mode === 'managed' && <button disabled={busy} onClick={() => {
@@ -230,7 +249,7 @@ export function WorkPage({user}: {user: User}) {
             navigate('/trash');
           }).catch(e => setNotice({text: message(e), error:true}));
         }}>{t("В корзину")}</button>}
-      </div>}
+      </div></details>}
     </div></section>
     {notice && <Notice error={notice.error}>{notice.text}</Notice>}
     {own && merging && <MergeWorks key={work.id} target={work} onMerged={async merged => {
@@ -278,7 +297,7 @@ export function WorkPage({user}: {user: User}) {
     <ul className="rows">{files.map(file => <li key={file.id}>
       <div><strong>{file.format.toUpperCase()}</strong><small>{file.name} · {formatBytes(file.size)}{file.derived_from ? t(" · Конвертирован") : ''}</small></div>
       <div className="actions">
-        {['epub','pdf'].includes(file.format) && <Link className="button primary" to={'/read/' + file.id}>{t("Читать")}</Link>}
+        {['epub','pdf'].includes(file.format) && <Link className="button" to={'/read/' + file.id} state={{bookOrigin:origin}}>{t("Читать")} {file.format.toUpperCase()}</Link>}
         {own && Object.hasOwn(conversionTargets, file.format) && !files.some(f => f.derived_from === file.id) &&
           <button disabled={busy} onClick={() => perform(() => api('/conversions/' + file.id, json('POST')), t("Конвертация добавлена в очередь"))}>{t("Преобразовать в ")}{conversionTargets[file.format]}</button>}
         <Link className="button" to={'/devices/sony?file=' + file.id}>{t("Для Sony")}</Link>
@@ -332,11 +351,16 @@ export function Libraries({user}: {user: User}) {
   const [notice, setNotice] = useState<{text: string; error?: boolean}>();
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<Library>();
-  const [reviews, setReviews] = useState<{id: number; file: File; library: number;
-    matches: {work_id: number; title: string; reason: string}[]}[]>([]);
-  const reviewId = useRef(0);
-  function finishReview(id: number) {
-    setReviews(current => current.filter(item => item.id !== id));
+  const [params] = useSearchParams();
+  const quick = params.has('upload');
+  const [target, setTarget] = useState(() => Number(params.get('target')) || 0);
+  const writable = libraries.data?.filter(lib => lib.mode === 'managed' && !user.read_only && (user.admin || lib.owner_id === user.id)) || [];
+  const destination = writable.find(lib => lib.id === target) || writable[0];
+  const drafts = useQuery({queryKey:['upload-reviews',user.id], queryFn:() => uploadReviews(user.id)});
+  const reviews = drafts.data || [];
+  async function finishReview(id: number) {
+    await deleteReview(id);
+    await drafts.refetch();
   }
   async function write(fn: () => Promise<void>) {
     setBusy(true);
@@ -355,7 +379,8 @@ export function Libraries({user}: {user: User}) {
     const form = event.currentTarget;
     const data = new FormData(form);
     void write(async () => {
-      await api('/libraries', json('POST', {...Object.fromEntries(data), shared: data.has('shared'), mode: newMode}));
+      const created = await api<Library>('/libraries', json('POST', {...Object.fromEntries(data), shared: data.has('shared'), mode: quick ? 'managed' : newMode}));
+      setTarget(created.id);
       form.reset();
       setMode('managed');
       notify("Библиотека создана");
@@ -395,12 +420,12 @@ export function Libraries({user}: {user: User}) {
         const data = new FormData();
         data.set('file', file);
         try {
-          const result = await api<{duplicate: boolean} | {matches: typeof reviews[number]['matches']}>(
-            '/libraries/' + id + '/upload?review_matches=true', {method: 'POST', body: data});
+          const result = await api<{duplicate: boolean} | {matches: UploadReview['matches']}>(
+            '/libraries/' + id + '/upload?review_matches=true', forUser(user.id,{method: 'POST', body: data}));
           if ('matches' in result) {
+            await saveReview({userId:user.id,file,library:id,matches:result.matches});
+            await drafts.refetch();
             pending++;
-            const review = {id: ++reviewId.current, file, library: id, matches: result.matches};
-            setReviews(current => [...current, review]);
           } else if (result.duplicate) duplicates++; else added++;
         } catch (e) {
           failures.push((file instanceof File ? file.name + ' — ' : '') + message(e));
@@ -414,20 +439,24 @@ export function Libraries({user}: {user: User}) {
     });
   }
   return <>
-    <header className="heading"><div><h1>{t("Библиотеки")}</h1><p>{t("Управляйте коллекциями и подключёнными папками")}</p></div>
-      {!user.read_only && <Link className="button" to="/trash">{t("Корзина")}</Link>}</header>
+    <header className="heading"><div><h1>{quick ? t("Добавить книги") : t("Библиотеки")}</h1><p>{quick ? t("Выберите библиотеку и файлы книг.") : t("Управляйте коллекциями и подключёнными папками")}</p></div>
+      {quick ? <Link to="/libraries">{t("Управление библиотеками")}</Link> : !user.read_only && <Link className="button" to="/trash">{t("Корзина")}</Link>}</header>
     {notice && <Notice error={notice.error}>{notice.text}</Notice>}
+    {drafts.error && <Notice error>{message(drafts.error)}</Notice>}
+    {quick && writable.length > 1 && <label>{t("Библиотека")}<select value={destination?.id} onChange={event => setTarget(Number(event.target.value))}>
+      {writable.map(lib => <option key={lib.id} value={lib.id}>{lib.name}</option>)}</select></label>}
+    {quick && libraries.isSuccess && !writable.length && <p>{t("Создайте библиотеку для первой загрузки.")}</p>}
     <div className="split">
       <div>
         {libraries.isPending && <p>{t("Загружаем библиотеки…")}</p>}
         {libraries.error && <Notice error>{message(libraries.error)}</Notice>}
-        {libraries.data?.map(lib => {
+        {libraries.data?.filter(lib => !quick || lib.id === destination?.id).map(lib => {
           const canWrite = !user.read_only && (user.admin || lib.owner_id === user.id);
           return <section className="panel library-panel" key={lib.id}>
             <h2><Link to={'/?library_id=' + lib.id}>{lib.name}</Link></h2>
             <p>{lib.mode === 'indexed' ? t("Индексируемая · /inbox/") + lib.folder : t("Управляемая")}{lib.shared && t(" · Общий доступ")}</p>
             {lib.description && <p>{lib.description}</p>}
-            {canWrite && <div className="scan">
+            {!quick && canWrite && <div className="scan">
               <button type="button" aria-expanded={editing?.id === lib.id} disabled={busy}
                 onClick={() => setEditing(editing?.id === lib.id ? undefined : lib)}>{t("Настройки библиотеки")}</button>
               {editing?.id === lib.id && <form className="fields" onSubmit={event => edit(event, editing)}>
@@ -439,7 +468,7 @@ export function Libraries({user}: {user: User}) {
                 <button disabled={busy}>{t("Сохранить настройки библиотеки")}</button>
               </form>}
             </div>}
-            {canWrite && lib.mode === 'managed' && <p><Link to={'/libraries/' + lib.id + '/layout'}>{t("Раскладка файлов")}</Link></p>}
+            {!quick && canWrite && lib.mode === 'managed' && <p><Link to={'/libraries/' + lib.id + '/layout'}>{t("Раскладка файлов")}</Link></p>}
             {canWrite && lib.mode === 'managed' && <form className="fields" onSubmit={event => upload(event, lib.id)}>
               <label>{t("Файлы книг")}<input required multiple type="file" name="file" accept={bookExtensions}/></label>
               <button disabled={busy}>{t("Загрузить файлы")}</button>
@@ -453,13 +482,15 @@ export function Libraries({user}: {user: User}) {
                   const data = new FormData();
                   data.set('file', item.file);
                   const path = choice === 'new' ? '/libraries/' + lib.id + '/upload' : '/books/' + choice + '/editions/upload';
-                  const result = await api<{duplicate: boolean}>(path, {method: 'POST', body: data});
-                  finishReview(item.id);
+                  const result = await api<{duplicate: boolean}>(path, forUser(user.id,{method: 'POST', body: data}));
+                  await finishReview(item.id);
                   notify(result.duplicate ? t("Дубликатов ") + '1' : t("Добавлено ") + '1');
                 });
               }}>
                 <strong>{item.file.name}</strong>
-                <label>{t("Возможные совпадения в библиотеке")}<select required name="work" defaultValue="">
+                <label>{t("Возможные совпадения в библиотеке")}<select required name="work" defaultValue={item.choice || ''} onChange={event => {
+                  void chooseReview(item.id,user.id,event.target.value).catch(error => setNotice({text:message(error),error:true}));
+                }}>
                   <option value="" disabled>{t("Выберите действие")}</option>
                   {item.matches.map(match => <option key={match.work_id} value={match.work_id}>
                     {t("Добавить издание в «{title}»", {title: match.title})} (#{match.work_id}) · {t(match.reason)}
@@ -467,9 +498,9 @@ export function Libraries({user}: {user: User}) {
                   <option value="new">{t("Создать отдельную карточку")}</option>
                 </select></label>
                 <div><button disabled={busy}>{t("Сохранить")}</button>{' '}
-                  <button type="button" disabled={busy} onClick={() => finishReview(item.id)}>{t("Пропустить")}</button></div>
+                  <button type="button" disabled={busy} onClick={() => write(() => finishReview(item.id))}>{t("Пропустить")}</button></div>
               </form>)}
-            {canWrite && user.admin && <form className="fields scan" onSubmit={event => {
+            {!quick && canWrite && user.admin && <form className="fields scan" onSubmit={event => {
               event.preventDefault();
               const folder = new FormData(event.currentTarget).get('folder') || '';
               void write(async () => {
@@ -481,15 +512,15 @@ export function Libraries({user}: {user: User}) {
               {lib.mode === 'managed' && <label>{t("Подкаталог в /inbox")}<input name="folder" placeholder={t("Вся папка")}/></label>}
               <button disabled={busy}>{t("Предпросмотр импорта")}</button>
             </form>}
-            {canWrite && user.admin && <ScheduleSettings library={lib}/>}
+            {!quick && canWrite && user.admin && <ScheduleSettings library={lib}/>}
           </section>;
         })}
       </div>
-      {!user.read_only && <form className="panel fields" onSubmit={create}>
+      {!user.read_only && (!quick || libraries.isSuccess && !writable.length) && <form className="panel fields" onSubmit={create}>
         <h2>{t("Новая библиотека")}</h2>
         <label>{t("Название")}<input required maxLength={120} name="name"/></label>
         <label>{t("Описание")}<textarea name="description" maxLength={2000}/></label>
-        {user.admin && <>
+        {!quick && user.admin && <>
           <label>{t("Хранение")}<select value={newMode} onChange={event => setMode(event.target.value)}>
             <option value="managed">{t("Копировать оригиналы в приложение")}</option><option value="indexed">{t("Индексировать папку только для чтения")}</option>
           </select></label>
@@ -629,7 +660,8 @@ function operationStatus(job: Job, jobs: Job[]) {
   return statusLabels[job.status] || job.status;
 }
 
-export function Operations() {
+export function Operations({user}: {user:User}) {
+  const drafts = useQuery({queryKey:['upload-reviews',user.id],queryFn:() => uploadReviews(user.id)});
   const jobs = useQuery({queryKey: ['jobs'], queryFn: () => api<Job[]>('/imports'), refetchInterval: 2500});
   const libraries = useLibraries();
   const client = useQueryClient();
@@ -659,6 +691,8 @@ export function Operations() {
   }
   return <>
     <header className="heading"><div><h1>{t("Загрузки и импорт")}</h1><p>{t("Очередь, планы сканирования и результаты обработки")}</p></div></header>
+    {!!drafts.data?.length && <section className="panel"><h2>{t("Ожидают выбора: {count}", {count:drafts.data.length})}</h2>
+      {drafts.data.map(item => <p key={item.id}><Link to={'/libraries?upload=1&target='+item.library}>{item.file.name}</Link></p>)}</section>}
     {desired && !desired.result?.read_file_id && (desired.status === 'queued' || desired.status === 'running' || preparing?.status === 'queued' || preparing?.status === 'running') &&
       <Notice>{preparing ? t("Конвертируем книгу для чтения…") : t("Читалка откроется после импорта.")}</Notice>}
     {(desiredFile?.status === 'queued' || desiredFile?.status === 'running') && <Notice>{t("Файл можно будет скачать из этой очереди после проверки.")}</Notice>}

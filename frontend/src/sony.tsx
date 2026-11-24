@@ -50,22 +50,18 @@ export function SonyPage() {
   async function selectAll() {
     const files = [...picked];
     const included = new Set(files.map(file => file.work_id));
-    let nextPage = 1;
-    let more = true;
-    while (more) {
-      const query = new URLSearchParams({q:term, page:String(nextPage++), limit:'100'});
-      const result = await api<{items: Work[]; has_next: boolean}>('/books?' + query);
-      for (const work of result.items) {
-        if (included.has(work.id)) continue;
-        const editions = work.editions.flatMap(edition => edition.files);
-        const file = editions.find(item => item.format === 'epub') || editions.find(item => item.format === 'pdf') || editions[0];
-        if (file) {
-          files.push({id:file.id, title:work.title, format:file.format, work_id:work.id});
-          included.add(work.id);
-        }
+    const query = new URLSearchParams({q:term});
+    let before: number | null = null;
+    do {
+      if (before !== null) query.set('before',String(before));
+      const result = await api<{items:Selected[]; next:number|null}>(endpoint + '/selection?' + query);
+      for (const file of result.items) {
+        if (included.has(file.work_id)) continue;
+        files.push(file);
+        included.add(file.work_id);
       }
-      more = result.has_next;
-    }
+      before = result.next;
+    } while (before !== null);
     setSelected(files);
     setPlan(undefined);
   }
@@ -101,6 +97,39 @@ export function SonyPage() {
         {!!picked.length && <button disabled={busy} onClick={() => {
           setSelected([]); setRemovedInitial(true); setProgressId(undefined); setPlan(undefined);
         }}>{t("Снять выбор")}</button>}
+        <section className="panel">
+          <h2>{t("Пакет для Sony")}</h2>
+          {picked.length ? <details><summary>{t("Выбранные файлы")} ({picked.length})</summary><ul className="rows">{picked.map(item => <li key={item.id}>
+            <div><strong>{item.title}</strong><small>{item.format.toUpperCase()}</small></div>
+            <button disabled={busy} onClick={() => remove(item.id)} aria-label={t("Убрать ") + item.title}>{t("Убрать")}</button>
+          </li>)}</ul></details> : <p>{t("Выберите хотя бы один файл из каталога.")}</p>}
+          {!!picked.length && !plan && <p>{t("Файлов: {files}. ZIP-пакетов: {packages}.", {files:picked.length, packages:Math.ceil(picked.length / packageLimit)})}</p>}
+          {!!picked.length && !plan && <button disabled={busy} onClick={() => act(async () => {
+            const files: Planned[] = [];
+            for (let i = 0; i < picked.length; i += packageLimit) {
+              const ids = picked.slice(i, i + packageLimit).map(item => item.id);
+              const data = await api<{files: Planned[]}>(endpoint + '/preview', json('POST', {file_ids:ids}));
+              files.push(...data.files);
+            }
+            setPlan(files);
+          })}>{t("Посмотреть план экспорта")}</button>}
+          {plan && <>
+            <p>{t("Файлов: {files}. ZIP-пакетов: {packages}.", {files:plan.length, packages:Math.ceil(plan.length / packageLimit)})}</p>
+            <details><summary>{t("Состав пакета")}</summary><ul className="rows">{plan.map(item => <li key={item.file_id}><div><strong>{item.title}</strong>
+              <small>{item.source_format.toUpperCase()} → {item.format === 'epub' ? 'EPUB 2' : 'PDF'}</small></div></li>)}</ul></details>
+            <button className="primary" disabled={busy} onClick={() => act(async () => {
+              for (let i = 0; i < plan.length; i += packageLimit) {
+                const ids = plan.slice(i, i + packageLimit).map(item => item.file_id);
+                await api(endpoint + '/exports', json('POST', {file_ids:ids}));
+                const remaining = plan.slice(i + packageLimit);
+                setPlan(remaining.length ? remaining : undefined);
+                void jobs.refetch();
+              }
+              notify("Подготовка пакета ZIP поставлена в очередь");
+              await jobs.refetch();
+            })}>{t("Подготовить ZIP")}</button>
+          </>}
+        </section>
         {catalog.isPending && <p aria-busy="true">{t("Загружаем книги…")}</p>}
         {catalog.data?.items.length === 0 && <p>{t("Книги не найдены.")}</p>}
         <ul className="rows">{catalog.data?.items.map(work => <li key={work.id}><div>
@@ -119,38 +148,7 @@ export function SonyPage() {
         </div>}
       </section>
       <div>
-        <section className="panel">
-          <h2>{t("Пакет для Sony")}</h2>
-          {picked.length ? <ul className="rows">{picked.map(item => <li key={item.id}>
-            <div><strong>{item.title}</strong><small>{item.format.toUpperCase()}</small></div>
-            <button disabled={busy} onClick={() => remove(item.id)} aria-label={t("Убрать ") + item.title}>{t("Убрать")}</button>
-          </li>)}</ul> : <p>{t("Выберите хотя бы один файл из каталога.")}</p>}
-          {!!picked.length && <button disabled={busy} onClick={() => act(async () => {
-            const files: Planned[] = [];
-            for (let i = 0; i < picked.length; i += packageLimit) {
-              const ids = picked.slice(i, i + packageLimit).map(item => item.id);
-              const data = await api<{files: Planned[]}>(endpoint + '/preview', json('POST', {file_ids:ids}));
-              files.push(...data.files);
-            }
-            setPlan(files);
-          })}>{t("Посмотреть план экспорта")}</button>}
-          {plan && <>
-            <p>{t("Файлов: {files}. ZIP-пакетов: {packages}.", {files:plan.length, packages:Math.ceil(plan.length / packageLimit)})}</p>
-            <ul className="rows">{plan.map(item => <li key={item.file_id}><div><strong>{item.title}</strong>
-              <small>{item.source_format.toUpperCase()} → {item.format === 'epub' ? 'EPUB 2' : 'PDF'}</small></div></li>)}</ul>
-            <button className="primary" disabled={busy} onClick={() => act(async () => {
-              for (let i = 0; i < plan.length; i += packageLimit) {
-                const ids = plan.slice(i, i + packageLimit).map(item => item.file_id);
-                await api(endpoint + '/exports', json('POST', {file_ids:ids}));
-                const remaining = plan.slice(i + packageLimit);
-                setPlan(remaining.length ? remaining : undefined);
-                void jobs.refetch();
-              }
-              notify("Подготовка пакета ZIP поставлена в очередь");
-              await jobs.refetch();
-            })}>{t("Подготовить ZIP")}</button>
-          </>}
-        </section>
+
         <section className="panel">
           <h2>{t("Пакеты для переноса")}</h2>
           {jobs.data?.length === 0 && <p>{t("Здесь появятся подготовленные пакеты.")}</p>}

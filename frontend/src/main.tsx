@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-quer
 import { BookCopy, BookOpen, BookOpenText, Download, FolderDown, FolderHeart, Globe2, House, LibraryBig, Search, Settings2, Tablet, UsersRound } from 'lucide-react';
 import { lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Link, Navigate, NavLink, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Link, Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { api, ApiError, json, type User } from './api';
 import { AuthorPage, AuthorsPage } from './authors';
 import { Catalog, WorkPage, Libraries, Operations, History, Settings } from './library';
@@ -13,7 +13,7 @@ import { LayoutPage, TrashPage } from './management';
 import { SonyPage } from './sony';
 import { SeriesDetail, SeriesPage } from './series';
 import { OfflineShelf } from './offline-shelf';
-import { clearCopies, identityKey, lastUser, offlineSupported, rememberUser } from './offline';
+import { clearCopies, identityKey, lastUser, offlineSupported, rememberUser, savedFiles } from './offline';
 import { AppearanceSettings, LanguageSelect, useInterfaceTheme } from './appearance';
 import { ToastProvider } from './toasts';
 import './style.css';
@@ -76,6 +76,24 @@ function SignIn({setup, requireKey}: {setup: boolean; requireKey: boolean}) {
 }
 
 function App() {
+  const route = useLocation();
+  const [menu, setMenu] = useState(false);
+  useEffect(() => {
+    setMenu(false);
+    const main = document.getElementById('main-content');
+    main?.focus({preventScroll:true});
+    const offset = route.state?.restoreScroll;
+    if (typeof offset !== 'number' || !main) { window.scrollTo(0, 0); return; }
+    const restore = () => window.scrollTo(0, offset);
+    restore();
+    const observer = new ResizeObserver(restore);
+    observer.observe(main);
+    const stop = () => observer.disconnect();
+    window.addEventListener('wheel', stop, {once:true});
+    window.addEventListener('touchstart', stop, {once:true});
+    const timer = window.setTimeout(stop, 1200);
+    return () => {stop(); clearTimeout(timer); window.removeEventListener('wheel', stop); window.removeEventListener('touchstart', stop);};
+  }, [route.pathname, route.key]);
   const language = useLanguage();
   const appearance = useInterfaceTheme();
   useEffect(() => {
@@ -121,13 +139,15 @@ function App() {
   ] as const;
   if (offline && !/^\/(?:offline\/?|read\/\d+\/?)$/.test(location.pathname)) return <Navigate to="/offline" replace/>;
   return <ToastProvider key={user.id}><div className="shell">
+    <a className="skip-link" href="#main-content">{t("К содержимому")}</a>
     <aside className="sidebar">
       <Brand to={offline ? '/offline' : '/home'}/>
-      <nav aria-label={t("Разделы")}>{nav.map(([to, label, Icon]) => <NavLink key={to} to={to} end={to === '/' || to === '/sources'}>
+      <button className="menu-toggle" aria-expanded={menu} aria-controls="site-menu" onClick={() => setMenu(!menu)}>{t("Меню")}</button>
+      <nav id="site-menu" data-open={menu} aria-label={t("Разделы")} onClick={() => setMenu(false)}>{nav.map(([to, label, Icon]) => <NavLink key={to} to={to} end={to === '/' || to === '/sources'}>
         <Icon aria-hidden size={18}/><span>{label}</span></NavLink>)}</nav>
       <div className="account">{user.username}</div>
     </aside>
-    <main className="main">
+    <main className="main" id="main-content" tabIndex={-1}>
       <Routes>
         <Route path="/" element={<Catalog user={user}/>}/>
         <Route path="/home" element={<Home/>}/>
@@ -148,9 +168,14 @@ function App() {
         <Route path="/trash" element={<TrashPage/>}/>
         <Route path="/sources" element={<Sources key="catalogues" user={user}/>}/>
         <Route path="/sources/search" element={<Sources key="search" user={user} searchPage/>}/>
-        <Route path="/downloads" element={<Operations/>}/>
+        <Route path="/downloads" element={<Operations user={user}/>}/>
         <Route path="/devices/sony" element={<SonyPage key={location.search}/>}/>
         <Route path="/settings" element={<Settings user={user} appearance={<AppearanceSettings {...appearance}/>} logout={async () => {
+          if (offlineSupported()) {
+            const count = await savedFiles(user.id).then(files => files.length, () => undefined);
+            if (count !== 0 && !confirm(count === undefined ? t("При выходе офлайн-копии на этом устройстве будут очищены. Выйти?")
+              : t("При выходе с устройства будут удалены офлайн-копии ({count}). Оригиналы останутся на сервере. Выйти?", {count}))) return;
+          }
           await api('/auth/logout', json('POST'));
           rememberUser();
           if (offlineSupported()) await clearCopies(user.id).catch(() => {});

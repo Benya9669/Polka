@@ -65,7 +65,8 @@ def test_html_conversion_copy_omits_untrusted_markup(tmp_path):
 
 
 def test_sony_package_and_progress_use_personal_access(library, monkeypatch):
-    author, _, _ = library
+    author, private_library, _ = library
+    upload(author, private_library)
     shared = author.post("/api/v1/libraries", json={"name": "Общая Sony", "mode": "managed", "shared": True}).json()
     file = upload(author, shared["id"])["file"]
     file_id = file["id"]
@@ -82,6 +83,9 @@ def test_sony_package_and_progress_use_personal_access(library, monkeypatch):
     with TestClient(main.app) as reader:
         assert reader.post("/api/v1/auth/login", json=credentials).is_success
         base = "/api/v1/devices/sony"
+        result = reader.get(base + "/selection", params={"q":"Северная"}).json()
+        assert [item["id"] for item in result["items"]] == [file_id]
+        assert reader.get(base + "/selection", params={"before":result["items"][0]["work_id"]}).json()["items"] == []
         preview = reader.post(base + "/preview", json={"file_ids": [file_id]}).json()
         assert preview["files"][0]["format"] == "epub"
         result = reader.post(base + "/exports", json={"file_ids": [file_id]})
