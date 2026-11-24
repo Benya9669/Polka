@@ -11,14 +11,14 @@ from uuid import uuid4
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy import cast, func, or_, select, true
 from sqlalchemy.dialects.postgresql import JSONB
 
 from .auth import Current, DB
 from .author_names import catalog_search, linked_author, name_key, sync_author_credits
-from .books import MIME, copy_limited, file_path, indexed_source_matches, normal, search_text, store_book, under
+from .books import MIME, copy_limited, file_path, indexed_source_matches, inspect, normal, require_source_format, search_text, store_book, under
 from .conversions import CONVERSION_TARGETS
 from .db import (DATA, INBOX, Author, AuthorName, BookFile, Edition, Job, Library, Series, SeriesAncestor,
                  SeriesMembership, User, Work, WorkAuthor, now)
@@ -718,9 +718,9 @@ def job_json(task):
 
 
 @router.post("/libraries/{library_id}/upload", status_code=201)
-def upload(library_id: int, db: DB, user: Current, file: Annotated[UploadFile, File()]):
+def upload(library_id: int, db: DB, user: Current, file: Annotated[UploadFile, File()], review_lrf: bool = False):
     lib = library_or_404(db, user, library_id, write=True)
-    return save_upload(db, user, lib, file)
+    return save_upload(db, user, lib, file, review_lrf=review_lrf)
 
 
 @router.post("/books/{work_id}/editions/upload", status_code=201)
@@ -730,7 +730,7 @@ def upload_edition(work_id: int, db: DB, user: Current, file: Annotated[UploadFi
     return save_upload(db, user, lib, file, into_work_id=work.id, into_edition_id=edition_id)
 
 
-def save_upload(db, user, lib, file, *, into_work_id=None, into_edition_id=None):
+def save_upload(db, user, lib, file, *, into_work_id=None, into_edition_id=None, review_lrf=False):
     if lib.mode != "managed":
         raise HTTPException(409, "Выберите управляемую библиотеку")
     name = (file.filename or "Книга").replace("\\", "/").rsplit("/", 1)[-1][:240]
@@ -739,8 +739,22 @@ def save_upload(db, user, lib, file, *, into_work_id=None, into_edition_id=None)
     fd, temporary = tempfile.mkstemp()
     try:
         with os.fdopen(fd, "wb") as target:
-            copy_limited(file.file, target)
-        stored, duplicate = store_book(db, lib, Path(temporary), name,
+            checksum, _ = copy_limited(file.file, target)
+        path = Path(temporary)
+        inspected = None
+        if review_lrf:
+            with path.open("rb") as source:
+                is_lrf = source.read(6) == b"L\x00R\x00F\x00"
+            if is_lrf:
+                from .worker import possible_matches
+                lib = lock_library(db, lib)
+                require_source_format(lib, "lrf")
+                if not db.scalar(select(BookFile.id).filter_by(library_id=lib.id, sha256=checksum)):
+                    inspected = inspect(path, name)
+                    matches = possible_matches(db, lib, inspected[1], "lrf")
+                    if matches:
+                        return JSONResponse({"matches": matches})
+        stored, duplicate = store_book(db, lib, path, name, inspected=inspected,
                                         into_work_id=into_work_id, into_edition_id=into_edition_id)
         if not duplicate and stored.format in {"fb2", "fb2.zip"}:
             queue(db, user, lib, "conversion", {"file_id": stored.id})

@@ -121,6 +121,13 @@ def test_lrf_import_matches_existing_epub_and_skips_identical_copy(library, tmp_
     subprocess.run(["ebook-convert", str(source), str(lrf.with_suffix(".lrf"))], check=True, timeout=90)
     lrf.with_suffix(".lrf").rename(lrf)
     raw = lrf.read_bytes()
+    review_url = f"/api/v1/libraries/{ident}/upload?review_lrf=true"
+    files = {"file": ("renamed.LRF", raw)}
+    review = client.post(review_url, files=files)
+    assert review.status_code == 200
+    assert [item["work_id"] for item in review.json()["matches"]] == [work["id"]]
+    before, = client.get("/api/v1/books").json()["items"]
+    assert len(before["editions"]) == 1 and len(before["editions"][0]["files"]) == 1
     (inbox / "b.lrf").write_bytes(raw)
     scan = client.post(f"/api/v1/libraries/{ident}/scan", json={}).json()
     assert worker.run_one()
@@ -135,6 +142,7 @@ def test_lrf_import_matches_existing_epub_and_skips_identical_copy(library, tmp_
     assert card["id"] == work["id"]
     assert sorted(f["format"] for e in card["editions"] for f in e["files"]) == ["epub", "lrf"]
     assert upload(client, ident, raw, "renamed.lrf")["duplicate"]
+    assert client.post(review_url, files=files).json()["duplicate"]
     output = tmp_path / "converted.epub"
     subprocess.run(["ebook-convert", str(lrf), str(output)], check=True, timeout=90)
     assert books.inspect(output, output.name)[0] == "epub"

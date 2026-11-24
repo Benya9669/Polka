@@ -1,4 +1,6 @@
 export const english: Readonly<Record<string, string>> = {
+  "Выберите действие": "Choose an action",
+  "Ожидают выбора: {count}": "Awaiting a decision: {count}",
   "Для отпечатка файла пока нет прогресса KOReader": "KOReader has no progress for this file fingerprint yet",
   "Этот документ KOReader уже связан с другим файлом": "This KOReader document is already linked to another file",
   "Найти по отпечатку файла": "Find by file fingerprint",

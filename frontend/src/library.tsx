@@ -332,6 +332,12 @@ export function Libraries({user}: {user: User}) {
   const [notice, setNotice] = useState<{text: string; error?: boolean}>();
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<Library>();
+  const [reviews, setReviews] = useState<{id: number; file: File; library: number;
+    matches: {work_id: number; title: string; reason: string}[]}[]>([]);
+  const reviewId = useRef(0);
+  function finishReview(id: number) {
+    setReviews(current => current.filter(item => item.id !== id));
+  }
   async function write(fn: () => Promise<void>) {
     setBusy(true);
     setNotice(undefined);
@@ -382,20 +388,27 @@ export function Libraries({user}: {user: User}) {
     const form = event.currentTarget;
     const files = new FormData(form).getAll('file');
     void write(async () => {
-      let added = 0, duplicates = 0;
+      let added = 0, duplicates = 0, pending = 0;
       const failures = [];
       for (const file of files) {
+        if (!(file instanceof File)) continue;
         const data = new FormData();
         data.set('file', file);
         try {
-          const result = await api<{duplicate: boolean}>('/libraries/' + id + '/upload', {method: 'POST', body: data});
-          if (result.duplicate) duplicates++; else added++;
+          const result = await api<{duplicate: boolean} | {matches: typeof reviews[number]['matches']}>(
+            '/libraries/' + id + '/upload?review_lrf=true', {method: 'POST', body: data});
+          if ('matches' in result) {
+            pending++;
+            const review = {id: ++reviewId.current, file, library: id, matches: result.matches};
+            setReviews(current => [...current, review]);
+          } else if (result.duplicate) duplicates++; else added++;
         } catch (e) {
           failures.push((file instanceof File ? file.name + ' — ' : '') + message(e));
         }
       }
       form.reset();
       const counts = [t("Добавлено ") + added, t("Дубликатов ") + duplicates];
+      if (pending) counts.push(t("Ожидают выбора: {count}", {count: pending}));
       if (failures.length) setNotice({error: true, text: [...counts, ...failures].join(' · ')});
       else notify(counts.join(' · '));
     });
@@ -431,6 +444,31 @@ export function Libraries({user}: {user: User}) {
               <label>{t("Файлы книг")}<input required multiple type="file" name="file" accept={bookExtensions}/></label>
               <button disabled={busy}>{t("Загрузить файлы")}</button>
             </form>}
+            {reviews.filter(item => item.library === lib.id).map(item =>
+              <form key={item.id} className="fields" onSubmit={event => {
+                event.preventDefault();
+                const choice = new FormData(event.currentTarget).get('work');
+                if (!choice) return;
+                void write(async () => {
+                  const data = new FormData();
+                  data.set('file', item.file);
+                  const path = choice === 'new' ? '/libraries/' + lib.id + '/upload' : '/books/' + choice + '/editions/upload';
+                  const result = await api<{duplicate: boolean}>(path, {method: 'POST', body: data});
+                  finishReview(item.id);
+                  notify(result.duplicate ? t("Дубликатов ") + '1' : t("Добавлено ") + '1');
+                });
+              }}>
+                <strong>{item.file.name}</strong>
+                <label>{t("Возможные совпадения в библиотеке")}<select required name="work" defaultValue="">
+                  <option value="" disabled>{t("Выберите действие")}</option>
+                  {item.matches.map(match => <option key={match.work_id} value={match.work_id}>
+                    {t("Добавить издание в «{title}»", {title: match.title})} (#{match.work_id}) · {t(match.reason)}
+                  </option>)}
+                  <option value="new">{t("Создать отдельную карточку")}</option>
+                </select></label>
+                <div><button disabled={busy}>{t("Сохранить")}</button>{' '}
+                  <button type="button" disabled={busy} onClick={() => finishReview(item.id)}>{t("Пропустить")}</button></div>
+              </form>)}
             {canWrite && user.admin && <form className="fields scan" onSubmit={event => {
               event.preventDefault();
               const folder = new FormData(event.currentTarget).get('folder') || '';
