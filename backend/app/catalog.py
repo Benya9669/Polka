@@ -718,9 +718,10 @@ def job_json(task):
 
 
 @router.post("/libraries/{library_id}/upload", status_code=201)
-def upload(library_id: int, db: DB, user: Current, file: Annotated[UploadFile, File()], review_lrf: bool = False):
+def upload(library_id: int, db: DB, user: Current, file: Annotated[UploadFile, File()],
+           review_matches: bool = False, review_lrf: bool = False):
     lib = library_or_404(db, user, library_id, write=True)
-    return save_upload(db, user, lib, file, review_lrf=review_lrf)
+    return save_upload(db, user, lib, file, review_matches=review_matches, review_lrf=review_lrf)
 
 
 @router.post("/books/{work_id}/editions/upload", status_code=201)
@@ -730,7 +731,7 @@ def upload_edition(work_id: int, db: DB, user: Current, file: Annotated[UploadFi
     return save_upload(db, user, lib, file, into_work_id=work.id, into_edition_id=edition_id)
 
 
-def save_upload(db, user, lib, file, *, into_work_id=None, into_edition_id=None, review_lrf=False):
+def save_upload(db, user, lib, file, *, into_work_id=None, into_edition_id=None, review_matches=False, review_lrf=False):
     if lib.mode != "managed":
         raise HTTPException(409, "Выберите управляемую библиотеку")
     name = (file.filename or "Книга").replace("\\", "/").rsplit("/", 1)[-1][:240]
@@ -742,18 +743,20 @@ def save_upload(db, user, lib, file, *, into_work_id=None, into_edition_id=None,
             checksum, _ = copy_limited(file.file, target)
         path = Path(temporary)
         inspected = None
-        if review_lrf:
+        if review_lrf and not review_matches:
             with path.open("rb") as source:
-                is_lrf = source.read(6) == b"L\x00R\x00F\x00"
-            if is_lrf:
-                from .worker import possible_matches
-                lib = lock_library(db, lib)
-                require_source_format(lib, "lrf")
-                if not db.scalar(select(BookFile.id).filter_by(library_id=lib.id, sha256=checksum)):
-                    inspected = inspect(path, name)
-                    matches = possible_matches(db, lib, inspected[1], "lrf")
-                    if matches:
-                        return JSONResponse({"matches": matches})
+                review_matches = source.read(6) == b"L\x00R\x00F\x00"
+        if review_matches:
+            from .worker import possible_matches
+            lib = lock_library(db, lib)
+            if not db.scalar(select(BookFile.id).filter_by(library_id=lib.id, sha256=checksum)):
+                inspected = inspect(path, name)
+                fmt, metadata, _ = inspected
+                require_source_format(lib, fmt)
+                title = metadata.get("title") or name.removesuffix(".zip").rsplit(".", 1)[0]
+                matches = possible_matches(db, lib, {**metadata, "title": title}, fmt)
+                if matches:
+                    return JSONResponse({"matches": matches})
         stored, duplicate = store_book(db, lib, path, name, inspected=inspected,
                                         into_work_id=into_work_id, into_edition_id=into_edition_id)
         if not duplicate and stored.format in {"fb2", "fb2.zip"}:

@@ -276,6 +276,20 @@ def test_opds_authentication_discovery_and_basic_login(library, monkeypatch):
     assert client.post(endpoint, json={**payload, "url": "http://books.example/catalog"}).status_code == 422
 
 
+def test_upload_review_matches_fb2_and_filename_only_text(library):
+    client, ident, _ = library
+    upload(client, ident)
+    work, = client.get("/api/v1/books").json()["items"]
+    url = f"/api/v1/libraries/{ident}/upload?review_matches=true"
+    fb2 = FB2.replace("Снежная книга".encode(), work["title"].encode())
+    for name, data in [("other.fb2", fb2), (work["title"] + ".txt", b"plain text")]:
+        response = client.post(url, files={"file": (name, data)})
+        assert response.status_code == 200
+        assert response.json()["matches"][0]["work_id"] == work["id"]
+    assert client.post(url, files={"file": ("renamed.epub", epub_bytes())}).json()["duplicate"]
+    assert len(client.get("/api/v1/books").json()["items"]) == 1
+
+
 def test_duplicate_metadata_opds_and_token(library):
     client, ident, _ = library
     item = upload(client, ident)

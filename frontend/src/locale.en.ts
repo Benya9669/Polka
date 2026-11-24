@@ -1,4 +1,8 @@
 export const english: Readonly<Record<string, string>> = {
+  "Выбрать все найденные книги": "Select all matching books",
+  "Выбрать все книги": "Select all books",
+  "Снять выбор": "Clear selection",
+  "Файлов: {files}. ZIP-пакетов: {packages}.": "Files: {files}. ZIP packages: {packages}.",
   "Выберите действие": "Choose an action",
   "Ожидают выбора: {count}": "Awaiting a decision: {count}",
   "Для отпечатка файла пока нет прогресса KOReader": "KOReader has no progress for this file fingerprint yet",

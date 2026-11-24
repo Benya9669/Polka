@@ -396,7 +396,7 @@ export function Libraries({user}: {user: User}) {
         data.set('file', file);
         try {
           const result = await api<{duplicate: boolean} | {matches: typeof reviews[number]['matches']}>(
-            '/libraries/' + id + '/upload?review_lrf=true', {method: 'POST', body: data});
+            '/libraries/' + id + '/upload?review_matches=true', {method: 'POST', body: data});
           if ('matches' in result) {
             pending++;
             const review = {id: ++reviewId.current, file, library: id, matches: result.matches};

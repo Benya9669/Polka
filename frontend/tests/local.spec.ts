@@ -8,6 +8,38 @@ function notifications(page: Page) {
   return page.getByRole('complementary', {name:'Уведомления'});
 }
 
+test('Sony выбирает книги со всех страниц и разбивает экспорт на пакеты', async ({page}) => {
+  const packages: number[][] = [];
+  const works = Array.from({length: 101}, (_, i) => ({
+    id:i + 1, title:'Book ' + i, authors:[], editions:[{files:[
+      {id:1000 + i, format:'lrf', name:'source.lrf'}, {id:i + 1, format:'epub', name:'read.epub'}]}],
+  }));
+  await page.route('**/api/v1/**', async route => {
+    const url = new URL(route.request().url());
+    let json: unknown = [];
+    if (url.pathname.endsWith('/auth/me')) json = {id:1, username:'reader', admin:false};
+    if (url.pathname.endsWith('/books')) {
+      const limit = Number(url.searchParams.get('limit'));
+      const offset = (Number(url.searchParams.get('page')) - 1) * limit;
+      json = {items:works.slice(offset, offset + limit), has_next:offset + limit < works.length};
+    }
+    if (url.pathname.endsWith('/preview')) json = {files:route.request().postDataJSON().file_ids.map((id:number) =>
+      ({file_id:id, title:'Book ' + id, format:'epub', source_format:'epub'}))};
+    if (url.pathname.endsWith('/exports') && route.request().method() === 'POST') {
+      packages.push(route.request().postDataJSON().file_ids);
+      json = {id:packages.length};
+    }
+    await route.fulfill({json});
+  });
+  await page.goto('/devices/sony');
+  await page.getByRole('button', {name:'Выбрать все книги', exact:true}).click();
+  await page.getByRole('button', {name:'Посмотреть план экспорта'}).click();
+  await expect(page.getByText('Файлов: 101. ZIP-пакетов: 5.')).toBeVisible();
+  await page.getByRole('button', {name:'Подготовить ZIP', exact:true}).click();
+  await expect.poll(() => packages.map(group => group.length)).toEqual([25,25,25,25,1]);
+  expect(packages.flat()).toEqual(works.map(work => work.id));
+});
+
 test('переключает интерфейс на английский и сохраняет язык при повторном входе', async ({page, request, baseURL}, testInfo) => {
   const origin = new URL(baseURL!);
   if (!['localhost','127.0.0.1'].includes(origin.hostname) || origin.port !== '18080') throw new Error('Требуется тестовый сервер на порту 18080');
