@@ -132,7 +132,7 @@ def serialize_works(db, works):
             for work in works]
 
 
-BookFormat = Literal["epub", "fb2", "fb2.zip", "pdf", "txt", "mobi", "azw3", "djvu", "cbz", "html", "rtf"]
+BookFormat = Literal["epub", "fb2", "fb2.zip", "pdf", "txt", "mobi", "azw3", "lrf", "djvu", "cbz", "html", "rtf"]
 FormatList = Annotated[list[BookFormat], Field(max_length=len(MIME))]
 
 

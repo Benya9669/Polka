@@ -114,16 +114,21 @@ def calibre_metadata(path, kind):
         source = root / ("source." + kind)
         cover = root / "cover.jpg"
         shutil.copyfile(path, source)
-        result = subprocess.run(["ebook-meta", str(source), "--get-cover", str(cover)], capture_output=True, timeout=30)
+        opf = root / "metadata.opf"
+        result = subprocess.run(["ebook-meta", str(source), "--get-cover", str(cover), "--to-opf", str(opf)],
+                                capture_output=True, timeout=30)
         if result.returncode:
             raise ValueError("Calibre не смог прочитать метаданные книги")
         output = result.stdout.decode("utf-8", "replace")
         fields = {key.strip(): value.strip() for line in output.splitlines()
                   if ":" in line for key, value in [line.split(":", 1)]}
         fields = {key: value for key, value in fields.items() if value.casefold() not in {"unknown", "none", "und"}}
+        # The CLI display can append an author sort key in brackets. OPF keeps the credited names separate.
+        authors = [node.text.strip() for node in XML.parse(opf).findall(".//{http://purl.org/dc/elements/1.1/}creator")
+                   if node.text and node.text.strip() and node.text.strip().casefold() != "unknown"]
         raw_cover = cover.read_bytes() if cover.is_file() and cover.stat().st_size < 8 * 1024 * 1024 else None
     return {
-        "title": fields.get("Title", ""), "authors": fields.get("Author(s)", "").split(" & "),
+        "title": fields.get("Title", ""), "authors": authors,
         "publisher": fields.get("Publisher", ""), "language": fields.get("Languages", "").split(",")[0].strip(),
         "summary": fields.get("Comments", ""), "isbn": fields.get("ISBN", ""),
     }, raw_cover

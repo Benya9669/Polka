@@ -4,7 +4,7 @@ from zipfile import ZipFile
 from .books import MAX_BYTES, bounded_zip, copy_limited, epub_package, file_path, inspect, zip_read
 from .formats import local_html
 
-CONVERSION_TARGETS = {name: "epub" for name in ("fb2", "fb2.zip", "mobi", "azw3", "txt", "cbz", "html", "rtf")}
+CONVERSION_TARGETS = {name: "epub" for name in ("fb2", "fb2.zip", "mobi", "azw3", "lrf", "txt", "cbz", "html", "rtf")}
 CONVERSION_TARGETS["djvu"] = "pdf"
 SONY_TARGETS = {**CONVERSION_TARGETS, "epub": "epub", "pdf": "pdf"}
 

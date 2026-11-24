@@ -65,8 +65,8 @@ export type Position = {version: number; locator?: string; locator_type?: 'epub_
   alternate?: {file_id: number; format: string; percentage: number; updated: string}};
 export type Point = {locator: string; percentage: number; chapter?: string | null};
 
-export const bookExtensions = '.epub,.pdf,.fb2,.zip,.txt,.mobi,.azw3,.djvu,.cbz,.html,.htm,.xhtml,.rtf';
+export const bookExtensions = '.epub,.pdf,.fb2,.zip,.txt,.mobi,.azw3,.lrf,.djvu,.cbz,.html,.htm,.xhtml,.rtf';
 export const conversionTargets: Record<string, string> = {
-  fb2:'EPUB', 'fb2.zip':'EPUB', txt:'EPUB', mobi:'EPUB', azw3:'EPUB', cbz:'EPUB', html:'EPUB', rtf:'EPUB', djvu:'PDF',
+  fb2:'EPUB', 'fb2.zip':'EPUB', txt:'EPUB', mobi:'EPUB', azw3:'EPUB', lrf:'EPUB', cbz:'EPUB', html:'EPUB', rtf:'EPUB', djvu:'PDF',
 };
 

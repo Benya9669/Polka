@@ -27,7 +27,8 @@ type Authentication = {secure: boolean; same_origin: boolean; protected: boolean
 } | null};
 const endpoint = '/opds/sources';
 const labels: Record<string, string> = {'application/epub+zip': 'EPUB', 'application/x-fictionbook+xml':'FB2',
-  'application/pdf':'PDF', 'application/zip':'ZIP', 'text/plain':'TXT', 'application/x-mobipocket-ebook':'MOBI'};
+  'application/pdf':'PDF', 'application/zip':'ZIP', 'text/plain':'TXT', 'application/x-mobipocket-ebook':'MOBI',
+  'application/x-sony-bbeb':'LRF'};
 
 export function Sources({user, searchPage = false}: {user: User; searchPage?: boolean}) {
   const notify = useToast();

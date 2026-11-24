@@ -26,7 +26,7 @@ MIME = {
     "epub": "application/epub+zip", "fb2": "application/x-fictionbook+xml",
     "fb2.zip": "application/zip", "pdf": "application/pdf",
     "txt": "text/plain", "mobi": "application/x-mobipocket-ebook",
-    "azw3": "application/vnd.amazon.ebook", "djvu": "image/vnd.djvu",
+    "azw3": "application/vnd.amazon.ebook", "djvu": "image/vnd.djvu", "lrf": "application/x-sony-bbeb",
     "cbz": "application/vnd.comicbook+zip", "html": "text/html", "rtf": "application/rtf",
 }
 Image.MAX_IMAGE_PIXELS = 12_000_000
@@ -216,6 +216,12 @@ def inspect(path, name):
         if head[60:68] == b"BOOKMOBI":
             kind = mobi_kind(path, head)
             return kind, *calibre_metadata(path, kind)
+        if head.startswith(b"L\x00R\x00F\x00"):
+            objects = int.from_bytes(head[16:24], "little")
+            index = int.from_bytes(head[24:32], "little")
+            if index < 0x4e or not objects or index + objects * 16 > path.stat().st_size:
+                raise ValueError("Повреждена таблица объектов LRF")
+            return "lrf", *calibre_metadata(path, "lrf")
         if head.startswith(b"AT&TFORM") and head[12:16] in {b"DJVU", b"DJVM"}:
             if 12 + int.from_bytes(head[8:12], "big") > path.stat().st_size:
                 raise ValueError("Повреждён контейнер DjVu")

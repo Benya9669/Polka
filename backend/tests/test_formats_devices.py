@@ -109,6 +109,37 @@ def test_sony_package_and_progress_use_personal_access(library, monkeypatch):
         assert reader.get(path).status_code == 404
 
 
+@pytest.mark.skipif(shutil.which("ebook-convert") is None, reason="Requires Calibre")
+def test_lrf_import_matches_existing_epub_and_skips_identical_copy(library, tmp_path):
+    client, ident, inbox = library
+    original = epub_bytes()
+    upload(client, ident, original)
+    work, = client.get("/api/v1/books").json()["items"]
+    source = tmp_path / "source.epub"
+    source.write_bytes(original)
+    lrf = inbox / "a.LRF"
+    subprocess.run(["ebook-convert", str(source), str(lrf.with_suffix(".lrf"))], check=True, timeout=90)
+    lrf.with_suffix(".lrf").rename(lrf)
+    raw = lrf.read_bytes()
+    (inbox / "b.lrf").write_bytes(raw)
+    scan = client.post(f"/api/v1/libraries/{ident}/scan", json={}).json()
+    assert worker.run_one()
+    first, copy = client.get("/api/v1/imports").json()[0]["result"]["items"]
+    assert first["format"] == "lrf" and first["work_candidates"] == [work["id"]]
+    assert first["matches"][0]["reason"] == "Совпали название и автор, разные форматы"
+    assert copy["duplicate"]
+    decision = {"choices": {lrf.name: {"action": "work", "work_id": work["id"]}}}
+    assert client.post(f"/api/v1/imports/{scan['id']}/confirm", json=decision).is_success
+    assert worker.run_one()
+    card, = client.get("/api/v1/books").json()["items"]
+    assert card["id"] == work["id"]
+    assert sorted(f["format"] for e in card["editions"] for f in e["files"]) == ["epub", "lrf"]
+    assert upload(client, ident, raw, "renamed.lrf")["duplicate"]
+    output = tmp_path / "converted.epub"
+    subprocess.run(["ebook-convert", str(lrf), str(output)], check=True, timeout=90)
+    assert books.inspect(output, output.name)[0] == "epub"
+
+
 @pytest.mark.skipif(any(shutil.which(tool) is None for tool in ("ebook-convert", "ebook-meta", "c44", "ddjvu", "pdftoppm")),
                     reason="Requires conversion programs installed in the application image")
 def test_real_format_conversion_in_application_image(tmp_path, monkeypatch):
