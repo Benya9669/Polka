@@ -18,11 +18,11 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
       - name: Build Linux image
-        run: docker build --platform linux/amd64 -t polka:ci .
+        run: docker buildx build --load --platform linux/amd64 -t polka:ci .
       - name: Check application and converter
         run: docker run --rm polka:ci sh -ec 'test -s /app/web/index.html && python -c "import app.main" && ebook-convert --version'
       - name: Publish to GitHub Container Registry
@@ -38,7 +38,8 @@ jobs:
             tags+=("$GITHUB_REF_NAME")
           fi
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          refs=()
           for tag in "${tags[@]}"; do
-            docker tag polka:ci "$image:$tag"
-            docker push "$image:$tag"
+            refs+=(-t "$image:$tag")
           done
+          docker buildx build --platform linux/amd64 --provenance=false --push "${refs[@]}" .
